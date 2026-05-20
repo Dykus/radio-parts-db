@@ -41,7 +41,7 @@ def map_status(status_str):
     if not status_str:
         return 'new'
     s = status_str.strip().lower()
-    if s in ['новое', 'new', 'ок']:
+    if s in ['новое', 'new', 'ок', 'исправное']:
         return 'new'
     if s.startswith('б/у') or s.startswith('used'):
         return 'used'
@@ -51,8 +51,8 @@ def map_status(status_str):
 
 def import_csv(db: Database, file_path: str) -> tuple:
     """
-    Импорт CSV из Memento / Excel.
-    Возвращает (успешно_импортировано, количество_ошибок).
+    Импорт CSV из Memento Database.
+    Специально настроен на структуру: Место -> Контейнер -> Ячейка.
     """
     encoding = guess_encoding(file_path)
     logger.info(f"Определена кодировка: {encoding}")
@@ -94,7 +94,7 @@ def import_csv(db: Database, file_path: str) -> tuple:
 
             for i, row in enumerate(reader, start=2):
                 try:
-                    # 1. Формируем имя: Радиоэлемент + Тип + Значение + Ед.изм
+                    # 1. Формируем полное имя: Радиоэлемент + Тип + Значение + Ед.изм
                     radio = get_val('Радиоэлемент')
                     p_type = get_val('Тип')
                     
@@ -118,30 +118,35 @@ def import_csv(db: Database, file_path: str) -> tuple:
                     
                     status = map_status(get_val('Состояние'))
                     
-                    location = get_val('Место')
+                    # 3. Собираем ТРЕХУРОВНЕВОЕ место хранения
+                    # Это критически важно для работы навигатора!
+                    # Берем колонки: Место, Контейнер, Ячейка
+                    place = get_val('Место')
                     container = get_val('Контейнер')
-                    if container:
-                        location = f"{location} / {container}" if location else container
+                    cell = get_val('Ячейка')
+                    
+                    # Склеиваем их через ' / '
+                    location_parts = [p for p in [place, container, cell] if p]
+                    location = ' / '.join(location_parts) if location_parts else ''
                     
                     qty_raw = get_val('Количество')
                     quantity = int(float(qty_raw.replace(',', '.'))) if qty_raw else 0
                     
                     revision_date = parse_date(get_val('Время ревизии'))
                     
-                    # 3. Описание и ссылки (чистим HTML)
+                    # 4. Описание и заметки (чистим HTML)
                     desc_html = get_val('Описание')
                     notes = clean_html(desc_html)
                     
-                    # Добавляем технические параметры в заметки, если есть
                     specs = get_val('диаметр × высота')
                     if specs:
                         notes += f"\nРазмеры: {specs}" if notes else f"Размеры: {specs}"
                     
-                    # Ссылки на даташиты и сеть
+                    # 5. Ссылки и пути
                     datasheet = get_val('Ссылка на даташит') or get_val('Datasheed') or get_val('Ссылка в сеть')
                     image = get_val('Внешний вид') or get_val('По фото')
                     
-                    # 4. Подготовка данных для БД
+                    # 6. Подготовка данных для БД
                     part_data = {
                         'name': name,
                         'category': category,
@@ -150,7 +155,7 @@ def import_csv(db: Database, file_path: str) -> tuple:
                         'manufacturer': manufacturer,
                         'quantity': quantity,
                         'price': price,
-                        'location': location,
+                        'location': location, # Сохраняем строку вида "Дом / Подвал / Ячейка"
                         'status': status,
                         'revision_date': revision_date,
                         'notes': notes,
@@ -158,7 +163,7 @@ def import_csv(db: Database, file_path: str) -> tuple:
                         'datasheet_path': datasheet
                     }
                     
-                    # 5. Обработка категории (авто-создание если нет)
+                    # 7. Обработка категории (авто-создание если нет)
                     cat_id = None
                     if category:
                         cats = db.get_categories()
@@ -167,16 +172,15 @@ def import_csv(db: Database, file_path: str) -> tuple:
                             cat_id = db.create_category(category)
                         part_data['category_id'] = cat_id
                     
-                    # 6. Сохранение в БД
+                    # 8. Сохранение в БД
                     db.create_part(part_data)
                     imported_count += 1
                     
-                    # Логируем первые 3 успешных импорта для контроля
                     if imported_count <= 3:
-                        logger.info(f"✅ Строка {i}: добавлен '{name}'")
+                        logger.info(f"✅ Строка {i}: добавлен '{name}' -> {location}")
 
                 except Exception as e:
-                    logger.error(f" Ошибка в строке {i}: {e}")
+                    logger.error(f"❌ Ошибка в строке {i}: {e}")
                     error_count += 1
 
     except Exception as e:
