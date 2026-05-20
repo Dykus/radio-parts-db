@@ -179,3 +179,16 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+# ========================================
+# RadioPartsDB - пользовательские данные
+# ========================================
+# База данных и медиа-файлы (НЕ КОММИТИТЬ!)
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/images/*
+data/datasheets/*
+data/*.log
+
+# Но оставляем пустую папку в репозитории
+!data/.gitkeep

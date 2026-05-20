@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QSpinBox, QDoubleSpinBox, QDateTimeEdit, QTextEdit,
     QDialogButtonBox, QAbstractItemView, QMessageBox, QFileDialog
 )
-from PySide6.QtCore import Qt, QSortFilterProxyModel, QRegularExpression
+from PySide6.QtCore import Qt, QSortFilterProxyModel, QRegularExpression, QDate
 from PySide6.QtGui import QColor, QStandardItemModel, QStandardItem, QRegularExpressionValidator
 
 from core.database import Database
@@ -130,7 +130,13 @@ class PartDialog(QDialog):
         self.status_combo.setCurrentText(data.get('status', 'new'))
         self.image_path_edit.setText(data.get('image_path', ''))
         self.datasheet_path_edit.setText(data.get('datasheet_path', ''))
-        if data.get('revision_date'): self.revision_date.setDate(data['revision_date'])
+        
+        # ✅ Исправление: преобразуем строку даты в объект QDate
+        rev_date_str = data.get('revision_date')
+        if rev_date_str:
+            q_date = QDate.fromString(rev_date_str, "yyyy-MM-dd")
+            if q_date.isValid():
+                self.revision_date.setDate(q_date)
     
     def validate_and_accept(self):
         if not self.name_edit.text().strip():

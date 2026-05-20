@@ -1,28 +1,14 @@
 # utils/importer.py
 import csv
 import logging
+import re
+import io
 from core.database import Database
 
 logger = logging.getLogger(__name__)
 
-COLUMN_MAPPING = {
-    'name': ['name', 'наименование', 'название', 'component', 'деталь'],
-    'category': ['category', 'категория', 'группа', 'type'],
-    'part_type': ['type', 'тип', 'part type', 'вид'],
-    'package': ['package', 'корпус', 'case', 'footprint'],
-    'manufacturer': ['manufacturer', 'производитель', 'vendor', 'mfg'],
-    'part_number': ['part_number', 'артикул', 'mpn', 'p/n', 'part number'],
-    'quantity': ['quantity', 'количество', 'qty', 'кол-во', 'count'],
-    'price': ['price', 'цена', 'cost'],
-    'location': ['location', 'место', 'storage', 'where'],
-    'status': ['status', 'статус', 'состояние'],
-    'image_path': ['image', 'изображение', 'photo', 'картинка'],
-    'datasheet_path': ['datasheet', 'даташит', 'pdf', 'документ'],
-    'notes': ['notes', 'заметки', 'comment', 'описание'],
-}
-
 def guess_encoding(file_path):
-    """Попытка определить кодировку файла."""
+    """Определяет кодировку файла перебором."""
     encodings = ['utf-8-sig', 'utf-8', 'cp1251', 'latin1']
     for enc in encodings:
         try:
@@ -33,104 +19,169 @@ def guess_encoding(file_path):
             continue
     return 'utf-8'
 
+def clean_html(text):
+    """Удаляет HTML-теги, оставляя чистый текст."""
+    if not text:
+        return ""
+    clean = re.compile('<.*?>')
+    return clean.sub('', text).strip()
+
+def parse_date(date_str):
+    """Преобразует DD.MM.YYYY в YYYY-MM-DD для SQLite."""
+    if not date_str:
+        return None
+    try:
+        d, m, y = date_str.strip().split('.')
+        return f"{y}-{m}-{d}"
+    except Exception:
+        return None
+
+def map_status(status_str):
+    """Сопоставляет русские статусы Memento с БД."""
+    if not status_str:
+        return 'new'
+    s = status_str.strip().lower()
+    if s in ['новое', 'new', 'ок']:
+        return 'new'
+    if s.startswith('б/у') or s.startswith('used'):
+        return 'used'
+    if s in ['нет', 'bad', 'плохое', 'broken', 'сломано']:
+        return 'broken'
+    return 'suspect'
+
 def import_csv(db: Database, file_path: str) -> tuple:
-    """Импорт CSV файла в БД."""
+    """
+    Импорт CSV из Memento / Excel.
+    Возвращает (успешно_импортировано, количество_ошибок).
+    """
     encoding = guess_encoding(file_path)
-    logger.info(f"Кодировка файла: {encoding}")
-    
+    logger.info(f"Определена кодировка: {encoding}")
+
     imported_count = 0
     error_count = 0
     skipped_count = 0
-    
+
     try:
         with open(file_path, 'r', encoding=encoding, newline='') as f:
+            # Читаем первую строку для определения разделителя и заголовков
             first_line = f.readline()
-            f.seek(0)
+            delimiter = ';' if ';' in first_line else ','
             
-            if ';' in first_line:
-                delimiter = ';'
-            elif ',' in first_line:
-                delimiter = ','
-            elif '\t' in first_line:
-                delimiter = '\t'
-            else:
-                delimiter = ','
+            # Исправляем дублирующиеся заголовки (Memento часто их дублирует)
+            raw_headers = [h.strip().strip('"') for h in csv.reader([first_line], delimiter=delimiter).__next__()]
+            unique_headers = []
+            seen = {}
+            for h in raw_headers:
+                if h in seen:
+                    seen[h] += 1
+                    unique_headers.append(f"{h}_{seen[h]}")
+                else:
+                    seen[h] = 0
+                    unique_headers.append(h)
             
-            logger.info(f"Разделитель: '{delimiter}'")
-            logger.info(f"Первая строка: {first_line.strip()}")
+            # Собираем файл обратно в память с исправленным заголовком
+            lines = f.readlines()
+            fixed_header = delimiter.join([f'"{h}"' for h in unique_headers]) + "\n"
+            csv_data = io.StringIO(fixed_header + "".join(lines))
             
-            reader = csv.DictReader(f, delimiter=delimiter)
-            logger.info(f"Заголовки CSV: {reader.fieldnames}")
+            reader = csv.DictReader(csv_data, delimiter=delimiter)
+            logger.info(f"Обработано колонок: {len(reader.fieldnames)}")
 
-            if not reader.fieldnames:
-                logger.error("Пустой CSV файл или неверная кодировка")
-                return 0, 1
+            # Функция безопасного получения данных из строки
+            def get_val(key, default=''):
+                val = row.get(key, default)
+                return val.strip().strip('"') if val else default
 
-            headers_map = {k.strip().lower(): k for k in reader.fieldnames}
-            logger.info(f"Headers map: {headers_map}")
-            
-            db_to_csv_map = {}
-            for db_field, possible_names in COLUMN_MAPPING.items():
-                for name in possible_names:
-                    if name.lower() in headers_map:
-                        db_to_csv_map[db_field] = headers_map[name.lower()]
-                        logger.info(f"  {db_field} -> {headers_map[name.lower()]}")
-                        break
-            
-            for row_num, row in enumerate(reader, start=2):
+            for i, row in enumerate(reader, start=2):
                 try:
-                    if row_num == 2:
-                        logger.info(f"Пример строки данных: {row}")
+                    # 1. Формируем имя: Радиоэлемент + Тип + Значение + Ед.изм
+                    radio = get_val('Радиоэлемент')
+                    p_type = get_val('Тип')
                     
-                    part_data = {}
+                    # Собираем все пары Значение/Ед.изм (их может быть 1 или 2)
+                    values = [get_val(k) for k in row if 'Значение' in k and get_val(k)]
+                    units = [get_val(k) for k in row if 'Единица измерения' in k and get_val(k)]
+                    full_val = " ".join([f"{v} {u}" for v, u in zip(values, units)]).strip()
                     
-                    if 'name' in db_to_csv_map:
-                        raw_name = row.get(db_to_csv_map['name'], '').strip()
-                        if not raw_name:
-                            skipped_count += 1
-                            continue
-                        part_data['name'] = raw_name
-                    else:
-                        first_col = reader.fieldnames[0]
-                        raw_name = row.get(first_col, '').strip()
-                        if not raw_name:
-                            skipped_count += 1
-                            continue
-                        part_data['name'] = raw_name
+                    name = " ".join(filter(None, [radio, p_type, full_val])).strip()
+                    if not name:
+                        skipped_count += 1
+                        continue
 
-                    for db_field, csv_header in db_to_csv_map.items():
-                        if db_field == 'name': continue
-                        val = row.get(csv_header, '').strip()
-                        
-                        if val:
-                            if db_field == 'quantity':
-                                try: part_data[db_field] = int(float(val.replace(',', '.')))
-                                except: part_data[db_field] = 0
-                            elif db_field == 'price':
-                                try: part_data[db_field] = float(val.replace(',', '.'))
-                                except: part_data[db_field] = 0.0
-                            else:
-                                part_data[db_field] = val
+                    # 2. Основные поля
+                    category = radio if radio else p_type
+                    package = get_val('Корпус')
+                    manufacturer = get_val('Производитель')
                     
-                    if 'category' in part_data and part_data['category']:
-                        cat_name = part_data.pop('category')
+                    price_raw = get_val('Цена за шт.')
+                    price = float(price_raw.replace(',', '.').replace('₽', '').replace('$', '').strip()) if price_raw else 0.0
+                    
+                    status = map_status(get_val('Состояние'))
+                    
+                    location = get_val('Место')
+                    container = get_val('Контейнер')
+                    if container:
+                        location = f"{location} / {container}" if location else container
+                    
+                    qty_raw = get_val('Количество')
+                    quantity = int(float(qty_raw.replace(',', '.'))) if qty_raw else 0
+                    
+                    revision_date = parse_date(get_val('Время ревизии'))
+                    
+                    # 3. Описание и ссылки (чистим HTML)
+                    desc_html = get_val('Описание')
+                    notes = clean_html(desc_html)
+                    
+                    # Добавляем технические параметры в заметки, если есть
+                    specs = get_val('диаметр × высота')
+                    if specs:
+                        notes += f"\nРазмеры: {specs}" if notes else f"Размеры: {specs}"
+                    
+                    # Ссылки на даташиты и сеть
+                    datasheet = get_val('Ссылка на даташит') or get_val('Datasheed') or get_val('Ссылка в сеть')
+                    image = get_val('Внешний вид') or get_val('По фото')
+                    
+                    # 4. Подготовка данных для БД
+                    part_data = {
+                        'name': name,
+                        'category': category,
+                        'part_type': p_type,
+                        'package': package,
+                        'manufacturer': manufacturer,
+                        'quantity': quantity,
+                        'price': price,
+                        'location': location,
+                        'status': status,
+                        'revision_date': revision_date,
+                        'notes': notes,
+                        'image_path': image,
+                        'datasheet_path': datasheet
+                    }
+                    
+                    # 5. Обработка категории (авто-создание если нет)
+                    cat_id = None
+                    if category:
                         cats = db.get_categories()
-                        cat_id = next((c[0] for c in cats if c[1] == cat_name), None)
+                        cat_id = next((c[0] for c in cats if c[1] == category), None)
                         if cat_id is None:
-                            cat_id = db.create_category(cat_name)
+                            cat_id = db.create_category(category)
                         part_data['category_id'] = cat_id
-
+                    
+                    # 6. Сохранение в БД
                     db.create_part(part_data)
                     imported_count += 1
-                    logger.info(f"✅ Строка {row_num}: добавлен '{part_data['name']}'")
+                    
+                    # Логируем первые 3 успешных импорта для контроля
+                    if imported_count <= 3:
+                        logger.info(f"✅ Строка {i}: добавлен '{name}'")
 
                 except Exception as e:
-                    logger.error(f"❌ Ошибка в строке {row_num}: {e}")
+                    logger.error(f" Ошибка в строке {i}: {e}")
                     error_count += 1
 
     except Exception as e:
-        logger.error(f"Ошибка чтения файла: {e}")
+        logger.error(f"Критическая ошибка чтения файла: {e}")
         return 0, 1
 
-    logger.info(f"Итого: добавлено {imported_count}, пропущено {skipped_count}, ошибок {error_count}")
+    logger.info(f"Импорт завершен: добавлено {imported_count}, пропущено {skipped_count}, ошибок {error_count}")
     return imported_count, error_count
