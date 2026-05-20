@@ -1,14 +1,19 @@
 # ui/main_window.py
 import os
+import logging
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTreeView, QTableView, QHeaderView, QPushButton, QLineEdit,
     QStatusBar, QLabel, QDialog, QFormLayout, QComboBox, 
     QSpinBox, QDoubleSpinBox, QDateTimeEdit, QTextEdit,
-    QDialogButtonBox, QAbstractItemView, QMessageBox, QFileDialog
+    QDialogButtonBox, QAbstractItemView, QMessageBox, QFileDialog,
+    QScrollArea
 )
-from PySide6.QtCore import Qt, QSortFilterProxyModel, QRegularExpression, QDate
-from PySide6.QtGui import QColor, QStandardItemModel, QStandardItem, QRegularExpressionValidator
+# ✅ ИСПРАВЛЕНО: QDate перенесён в QtCore
+from PySide6.QtCore import Qt, QSortFilterProxyModel, QRegularExpression, QSize, QDate
+from PySide6.QtGui import QColor, QStandardItemModel, QStandardItem, QRegularExpressionValidator, QPixmap, QIcon
+
+logger = logging.getLogger(__name__)
 
 from core.database import Database
 from utils.importer import import_csv
@@ -60,11 +65,11 @@ class PartDialog(QDialog):
         self.status_combo.setCurrentText("new")
         
         self.image_path_edit = QLineEdit()
-        self.image_btn = QPushButton("️ Обзор...")
+        self.image_btn = QPushButton("🖼️ Обзор...")
         self.image_btn.clicked.connect(lambda: self._browse_file(self.image_path_edit, "Images (*.png *.jpg *.jpeg *.gif)"))
         
         self.datasheet_path_edit = QLineEdit()
-        self.datasheet_btn = QPushButton(" Обзор...")
+        self.datasheet_btn = QPushButton("📄 Обзор...")
         self.datasheet_btn.clicked.connect(lambda: self._browse_file(self.datasheet_path_edit, "PDF (*.pdf)"))
         
         self.revision_date = QDateTimeEdit()
@@ -124,7 +129,6 @@ class PartDialog(QDialog):
         self.image_path_edit.setText(data.get('image_path', ''))
         self.datasheet_path_edit.setText(data.get('datasheet_path', ''))
         
-        # Исправление для даты
         rev_date_str = data.get('revision_date')
         if rev_date_str:
             q_date = QDate.fromString(rev_date_str, "yyyy-MM-dd")
@@ -161,11 +165,11 @@ class PartsTableModel(QStandardItemModel):
         super().__init__()
         self.db = db
         self.setHorizontalHeaderLabels(["ID", "Наименование", "Тип", "Корпус", "Кол-во", "Цена", "Место", "Статус"])
-        self.load_data() # Загружаем все сразу при старте
+        self.load_data()
     
-    def load_data(self, category_id=None):
+    def load_data(self, category_id=None, filter_type="all"):
         self.removeRows(0, self.rowCount())
-        parts = self.db.get_all_parts(category_id)
+        parts = self.db.get_all_parts_filtered(category_id, filter_type)
         for p in parts:
             items = [
                 QStandardItem(str(p['id'])), QStandardItem(p['name']),
@@ -198,53 +202,87 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
-        self.setWindowTitle("📦 RadioPartsDB v0.3.0")
-        self.setMinimumSize(1200, 700)
+        self.setWindowTitle("📦 RadioPartsDB v0.4.0")
+        self.setMinimumSize(1400, 700)
+        self.current_filter = "all"
         self._init_ui()
-        self._load_categories() # Загружаем дерево
+        self._load_categories()
     
     def _init_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
         
+        # === ПАНЕЛЬ ИНСТРУМЕНТОВ ===
         toolbar = QHBoxLayout()
+        
         self.add_btn = QPushButton("➕ Добавить")
         self.add_btn.clicked.connect(self._add_part)
+        
         self.edit_btn = QPushButton("✏️ Редактировать")
         self.edit_btn.clicked.connect(self._edit_part)
+        
         self.del_btn = QPushButton("🗑️ Удалить")
         self.del_btn.clicked.connect(self._delete_part)
         
-        self.import_btn = QPushButton(" Импорт CSV")
+        self.import_btn = QPushButton("📥 Импорт CSV")
         self.import_btn.clicked.connect(self._import_csv)
+        
+        # === БЫСТРЫЕ ФИЛЬТРЫ ===
+        self.filter_all_btn = QPushButton("📋 Все")
+        self.filter_all_btn.setCheckable(True)
+        self.filter_all_btn.setChecked(True)
+        self.filter_all_btn.clicked.connect(lambda: self._apply_filter("all"))
+        
+        self.filter_stock_btn = QPushButton("✅ В наличии")
+        self.filter_stock_btn.setCheckable(True)
+        self.filter_stock_btn.clicked.connect(lambda: self._apply_filter("in_stock"))
+        
+        self.filter_low_btn = QPushButton("⚠️ Мало (<10)")
+        self.filter_low_btn.setCheckable(True)
+        self.filter_low_btn.clicked.connect(lambda: self._apply_filter("low_stock"))
+        
+        self.filter_out_btn = QPushButton("❌ Нет на складе")
+        self.filter_out_btn.setCheckable(True)
+        self.filter_out_btn.clicked.connect(lambda: self._apply_filter("out_of_stock"))
         
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("🔍 Поиск...")
         self.search_edit.textChanged.connect(self._filter_table)
         
+        # Собираем тулбар
         toolbar.addWidget(self.add_btn)
         toolbar.addWidget(self.edit_btn)
         toolbar.addWidget(self.del_btn)
         toolbar.addWidget(self.import_btn)
+        toolbar.addWidget(QLabel("|"))
+        toolbar.addWidget(self.filter_all_btn)
+        toolbar.addWidget(self.filter_stock_btn)
+        toolbar.addWidget(self.filter_low_btn)
+        toolbar.addWidget(self.filter_out_btn)
         toolbar.addStretch()
         toolbar.addWidget(self.search_edit)
         main_layout.addLayout(toolbar)
         
-        # === ДЕРЕВО КАТЕГОРИЙ + ТАБЛИЦА ===
-        splitter = QSplitter(Qt.Horizontal)
+        # === ОСНОВНОЙ РАЗДЕЛИТЕЛЬ (Дерево + Таблица + Фото) ===
+        main_splitter = QSplitter(Qt.Horizontal)
         
-        # Левая панель: Дерево
+        # ЛЕВАЯ ПАНЕЛЬ: Дерево категорий
         self.tree_view = QTreeView()
         self.tree_view.setHeaderHidden(True)
         self.tree_model = QStandardItemModel()
         self.tree_model.setHorizontalHeaderLabels(["Категории"])
         self.tree_view.setModel(self.tree_model)
         self.tree_view.clicked.connect(self._on_category_click)
+        self.tree_view.setMaximumWidth(250)
         
-        splitter.addWidget(self.tree_view)
+        main_splitter.addWidget(self.tree_view)
         
-        # Правая панель: Таблица
+        # ЦЕНТРАЛЬНАЯ ПАНЕЛЬ: Таблица
+        table_widget = QWidget()
+        table_layout = QVBoxLayout(table_widget)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.parts_model = PartsTableModel(self.db)
         self.filter_model = PartsFilterProxyModel()
         self.filter_model.setSourceModel(self.parts_model)
@@ -255,57 +293,252 @@ class MainWindow(QMainWindow):
         self.parts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.parts_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.parts_table.doubleClicked.connect(self._edit_part)
+        self.parts_table.selectionModel().selectionChanged.connect(self._on_selection_changed)
         
-        splitter.addWidget(self.parts_table)
-        splitter.setSizes([250, 950]) # 250px для дерева, остальное для таблицы
-        main_layout.addWidget(splitter)
+        table_layout.addWidget(self.parts_table)
+        main_splitter.addWidget(table_widget)
         
+        # ПРАВАЯ ПАНЕЛЬ: Предпросмотр фото
+        photo_panel = QWidget()
+        photo_layout = QVBoxLayout(photo_panel)
+        photo_layout.setContentsMargins(10, 10, 10, 10)
+        
+        photo_label = QLabel("🖼️ Предпросмотр")
+        photo_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        photo_layout.addWidget(photo_label)
+        
+        # Область для изображения
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setStyleSheet("""
+            QLabel {
+                background-color: #2b2b2b;
+                border: 2px dashed #555;
+                border-radius: 5px;
+                color: #888;
+            }
+        """)
+        self.image_label.setText("📷\nИзображение\nне выбрано")
+        self.image_label.setMinimumSize(300, 300)
+        
+        # Прокрутка для больших изображений
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(self.image_label)
+        scroll_area.setMinimumWidth(300)
+        
+        photo_layout.addWidget(scroll_area)
+        
+        # Информация о компоненте
+        self.info_label = QLabel("")
+        self.info_label.setWordWrap(True)
+        self.info_label.setStyleSheet("color: #aaa; padding: 5px;")
+        photo_layout.addWidget(self.info_label)
+        
+        photo_layout.addStretch()
+        
+        main_splitter.addWidget(photo_panel)
+        main_splitter.setSizes([250, 700, 300])
+        
+        main_layout.addWidget(main_splitter)
+        
+        # Статус-бар
         self.status = QStatusBar()
         self.setStatusBar(self.status)
         self._update_status()
     
+    def _apply_filter(self, filter_type):
+        """Применение быстрого фильтра."""
+        self.current_filter = filter_type
+        
+        # Сбрасываем все кнопки
+        self.filter_all_btn.setChecked(False)
+        self.filter_stock_btn.setChecked(False)
+        self.filter_low_btn.setChecked(False)
+        self.filter_out_btn.setChecked(False)
+        
+        # Активируем нужную
+        if filter_type == "all":
+            self.filter_all_btn.setChecked(True)
+        elif filter_type == "in_stock":
+            self.filter_stock_btn.setChecked(True)
+        elif filter_type == "low_stock":
+            self.filter_low_btn.setChecked(True)
+        elif filter_type == "out_of_stock":
+            self.filter_out_btn.setChecked(True)
+        
+        # Перезагружаем таблицу
+        category_id = self._get_selected_category()
+        self.parts_model.load_data(category_id, filter_type)
+        self._update_status()
+    
+    def _get_selected_category(self):
+        """Получить ID выбранной категории."""
+        indexes = self.tree_view.selectionModel().selectedIndexes()
+        if indexes:
+            return self.tree_model.data(indexes[0], Qt.UserRole)
+        return None
+    
+    def _on_selection_changed(self, selected, deselected):
+        """Обработка изменения выделения в таблице."""
+        indexes = self.parts_table.selectionModel().selectedRows()
+        if not indexes:
+            self._clear_image_preview()
+            return
+        
+        row = indexes[0].row()
+        part_id = int(self.filter_model.data(self.filter_model.index(row, 0)))
+        part = self.db.get_part(part_id)
+        
+        if part:
+            self._show_image_preview(part)
+        else:
+            self._clear_image_preview()
+    
+    def _show_image_preview(self, part):
+        """Показать изображение компонента (локальное или из интернета)."""
+        image_path = part.get('image_path', '').strip()
+        
+        if not image_path:
+            self._clear_image_preview()
+            return
+        
+        pixmap = QPixmap()
+        
+        # Проверяем, это несколько URL через запятую
+        if ',' in image_path:
+            urls = [url.strip() for url in image_path.split(',')]
+        else:
+            urls = [image_path]
+        
+        # Пробуем загрузить каждое изображение по очереди
+        for img_source in urls:
+            img_source = img_source.strip()
+            if not img_source:
+                continue
+                
+            try:
+                # Локальный файл
+                if img_source.startswith('file://'):
+                    # Android пути не будут работать на ПК
+                    continue
+                elif img_source.startswith(('http://', 'https://')):
+                    # === ЗАГРУЗКА ИЗ ИНТЕРНЕТА ===
+                    import urllib.request
+                    import ssl
+                    
+                    # Игнорируем ошибки SSL
+                    ssl_context = ssl.create_default_context()
+                    ssl_context.check_hostname = False
+                    ssl_context.verify_mode = ssl.CERT_NONE
+                    
+                    # Загружаем данные с таймаутом
+                    req = urllib.request.Request(
+                        img_source,
+                        headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                    )
+                    with urllib.request.urlopen(req, context=ssl_context, timeout=10) as response:
+                        image_data = response.read()
+                    
+                    # Пробуем загрузить в QPixmap
+                    if image_data and pixmap.loadFromData(image_data):
+                        logger.info(f"✅ Загружено изображение из {img_source[:50]}...")
+                        break  # Успешно загрузили, выходим из цикла
+                    else:
+                        logger.warning(f"⚠️ Не удалось распарсить изображение из {img_source[:50]}")
+                        continue
+                else:
+                    # === ЛОКАЛЬНЫЙ ФАЙЛ ===
+                    if os.path.exists(img_source):
+                        if pixmap.load(img_source):
+                            logger.info(f"✅ Загружен локальный файл: {img_source}")
+                            break
+                        else:
+                            logger.warning(f"⚠️ Не удалось загрузить файл: {img_source}")
+                    else:
+                        logger.debug(f"📁 Файл не найден: {img_source}")
+                        continue
+                        
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка загрузки из {img_source[:50]}: {type(e).__name__}")
+                continue
+        
+        # Показываем результат
+        if not pixmap.isNull():
+            scaled_pixmap = pixmap.scaled(
+                self.image_label.size() - QSize(20, 20),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.image_label.setPixmap(scaled_pixmap)
+            self.image_label.setText("")
+            self.image_label.setStyleSheet("""
+                QLabel {
+                    background-color: #1e1e1e;
+                    border: 1px solid #444;
+                    border-radius: 3px;
+                    padding: 5px;
+                }
+            """)
+        else:
+            self._clear_image_preview()
+            return
+        
+        # Обновляем информацию
+        info_text = f"<b>{part['name']}</b><br>"
+        if part.get('part_type'):
+            info_text += f"Тип: {part['part_type']}<br>"
+        if part.get('package'):
+            info_text += f"Корпус: {part['package']}<br>"
+        info_text += f"Количество: {part['quantity']}<br>"
+        info_text += f"Цена: {part['price']:.2f} ₽"
+        self.info_label.setText(info_text)
+    
+    def _clear_image_preview(self):
+        """Очистить предпросмотр."""
+        self.image_label.setText("📷\nИзображение\nне выбрано")
+        self.image_label.setStyleSheet("""
+            QLabel {
+                background-color: #2b2b2b;
+                border: 2px dashed #555;
+                border-radius: 5px;
+                color: #888;
+            }
+        """)
+        self.image_label.setPixmap(QPixmap())
+        self.info_label.setText("")
+    
     def _load_categories(self):
-        """Построение дерева категорий."""
         self.tree_model.clear()
         self.tree_model.setHorizontalHeaderLabels(["Категории"])
         
-        # Корневой элемент
         root_item = self.tree_model.invisibleRootItem()
-        
-        # Получаем все категории
         categories = self.db.get_categories()
         
-        # Создаем словарь для быстрого поиска: ID -> QStandardItem
         item_map = {}
         
-        # 1. Создаем элементы
         for cat in categories:
             cat_id, name, parent_id = cat
             item = QStandardItem(name)
-            item.setData(cat_id, Qt.UserRole) # Сохраняем ID в скрытых данных элемента
+            item.setData(cat_id, Qt.UserRole)
             item_map[cat_id] = item
         
-        # 2. Привязываем дочерние к родителям
         for cat in categories:
             cat_id, name, parent_id = cat
             item = item_map[cat_id]
             
             if parent_id is None or parent_id == 0:
-                # Корневая категория
                 root_item.appendRow(item)
             else:
-                # Вложенная категория
                 parent_item = item_map.get(parent_id)
                 if parent_item:
                     parent_item.appendRow(item)
                 else:
-                    # Если родитель не найден (ошибка данных), добавляем в корень
                     root_item.appendRow(item)
 
     def _on_category_click(self, index):
-        """Обработка клика по дереву."""
         cat_id = self.tree_model.data(index, Qt.UserRole)
-        self.parts_model.load_data(cat_id)
+        self.parts_model.load_data(cat_id, self.current_filter)
         self._update_status()
 
     def _filter_table(self, text):
@@ -313,7 +546,14 @@ class MainWindow(QMainWindow):
     
     def _update_status(self):
         stats = self.db.get_stats()
-        self.status.showMessage(f"📦 Всего: {stats['total_parts']} позиций | 💰 Стоимость: {stats['total_value']:.2f}₽ | ⚠️ Нет в наличии: {stats['out_of_stock']}")
+        filter_text = {
+            "all": "Все",
+            "in_stock": "В наличии",
+            "low_stock": "Мало",
+            "out_of_stock": "Нет на складе"
+        }.get(self.current_filter, "Все")
+        
+        self.status.showMessage(f"📦 Всего: {stats['total_parts']} позиций | 💰 Стоимость: {stats['total_value']:.2f}₽ | ⚠️ Нет в наличии: {stats['out_of_stock']} | 🔍 Фильтр: {filter_text}")
     
     def _add_part(self):
         dialog = PartDialog(self, db=self.db)
@@ -326,8 +566,8 @@ class MainWindow(QMainWindow):
                 if cat_id is None: cat_id = self.db.create_category(cat_name)
                 data['category_id'] = cat_id
             self.db.create_part(data)
-            self.parts_model.load_data() # Обновляем таблицу
-            self._load_categories() # Обновляем дерево
+            self.parts_model.load_data(self._get_selected_category(), self.current_filter)
+            self._load_categories()
             self._update_status()
             QMessageBox.information(self, "✅ Успех", "Компонент добавлен!")
     
@@ -343,7 +583,7 @@ class MainWindow(QMainWindow):
             dialog = PartDialog(self, part_data=part, db=self.db)
             if dialog.exec() == QDialog.Accepted:
                 self.db.update_part(part_id, dialog.get_data())
-                self.parts_model.load_data()
+                self.parts_model.load_data(self._get_selected_category(), self.current_filter)
                 self._load_categories()
                 self._update_status()
                 QMessageBox.information(self, "✅ Успех", "Компонент обновлён!")
@@ -358,7 +598,7 @@ class MainWindow(QMainWindow):
         part_name = self.filter_model.data(self.filter_model.index(row, 1))
         if QMessageBox.question(self, "❓ Подтверждение", f"Удалить \"{part_name}\"?\n\nДанные будут перемещены в архив.", QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
             self.db.delete_part(part_id)
-            self.parts_model.load_data()
+            self.parts_model.load_data(self._get_selected_category(), self.current_filter)
             self._load_categories()
             self._update_status()
             QMessageBox.information(self, "✅ Успех", "Компонент удалён и архивирован")
@@ -371,8 +611,8 @@ class MainWindow(QMainWindow):
                     self.status.showMessage("⏳ Идет импорт...")
                     QApplication.processEvents()
                     imported, errors = import_csv(self.db, file_path)
-                    self.parts_model.load_data()
-                    self._load_categories() # Обновляем дерево после импорта
+                    self.parts_model.load_data(self._get_selected_category(), self.current_filter)
+                    self._load_categories()
                     self._update_status()
                     QMessageBox.information(self, "Результат", f"✅ Импорт завершен!\nДобавлено: {imported}\nОшибок: {errors}")
                 except Exception as e:
