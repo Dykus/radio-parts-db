@@ -1,3 +1,4 @@
+# main.py
 import sys
 import logging
 from pathlib import Path
@@ -13,7 +14,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
                     handlers=[logging.FileHandler(DATA_DIR / "app.log", encoding="utf-8"), logging.StreamHandler()])
 
 def main():
-    QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
