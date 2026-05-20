@@ -30,12 +30,12 @@ class PartDialog(QDialog):
         layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("Например: Резистор 10кОм 0805")
-        
         self.category_combo = QComboBox()
         self.category_combo.setEditable(True)
         self.category_combo.setPlaceholderText("Выберите или введите")
-        self._load_categories()
+        if self.db:
+            cats = self.db.get_categories()
+            self.category_combo.addItems([""] + [c[1] for c in cats])
         
         self.part_type_edit = QLineEdit()
         self.package_combo = QComboBox()
@@ -46,7 +46,6 @@ class PartDialog(QDialog):
         self.part_number_edit = QLineEdit()
         self.quantity_spin = QSpinBox()
         self.quantity_spin.setRange(0, 999999)
-        
         self.price_spin = QDoubleSpinBox()
         self.price_spin.setRange(0, 999999.99)
         self.price_spin.setDecimals(2)
@@ -61,11 +60,11 @@ class PartDialog(QDialog):
         self.status_combo.setCurrentText("new")
         
         self.image_path_edit = QLineEdit()
-        self.image_btn = QPushButton("🖼️ Обзор...")
-        self.image_btn.clicked.connect(lambda: self._browse_file(self.image_path_edit, "Изображения (*.png *.jpg *.jpeg *.gif)"))
+        self.image_btn = QPushButton("️ Обзор...")
+        self.image_btn.clicked.connect(lambda: self._browse_file(self.image_path_edit, "Images (*.png *.jpg *.jpeg *.gif)"))
         
         self.datasheet_path_edit = QLineEdit()
-        self.datasheet_btn = QPushButton("📄 Обзор...")
+        self.datasheet_btn = QPushButton(" Обзор...")
         self.datasheet_btn.clicked.connect(lambda: self._browse_file(self.datasheet_path_edit, "PDF (*.pdf)"))
         
         self.revision_date = QDateTimeEdit()
@@ -74,7 +73,6 @@ class PartDialog(QDialog):
         
         self.notes_edit = QTextEdit()
         self.notes_edit.setMaximumHeight(60)
-        self.notes_edit.setPlaceholderText("Дополнительные заметки...")
         
         layout.addRow("Наименование *", self.name_edit)
         layout.addRow("Категория", self.category_combo)
@@ -109,11 +107,6 @@ class PartDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
     
-    def _load_categories(self):
-        if self.db:
-            cats = self.db.get_categories()
-            self.category_combo.addItems([""] + [c[1] for c in cats])
-    
     def _browse_file(self, line_edit, filter_str):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите файл", "", filter_str)
         if path: line_edit.setText(path)
@@ -131,7 +124,7 @@ class PartDialog(QDialog):
         self.image_path_edit.setText(data.get('image_path', ''))
         self.datasheet_path_edit.setText(data.get('datasheet_path', ''))
         
-        # ✅ Исправление: преобразуем строку даты в объект QDate
+        # Исправление для даты
         rev_date_str = data.get('revision_date')
         if rev_date_str:
             q_date = QDate.fromString(rev_date_str, "yyyy-MM-dd")
@@ -168,7 +161,7 @@ class PartsTableModel(QStandardItemModel):
         super().__init__()
         self.db = db
         self.setHorizontalHeaderLabels(["ID", "Наименование", "Тип", "Корпус", "Кол-во", "Цена", "Место", "Статус"])
-        self.load_data()
+        self.load_data() # Загружаем все сразу при старте
     
     def load_data(self, category_id=None):
         self.removeRows(0, self.rowCount())
@@ -205,9 +198,10 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
-        self.setWindowTitle("📦 RadioPartsDB v0.1.0")
+        self.setWindowTitle("📦 RadioPartsDB v0.3.0")
         self.setMinimumSize(1200, 700)
         self._init_ui()
+        self._load_categories() # Загружаем дерево
     
     def _init_ui(self):
         central = QWidget()
@@ -222,11 +216,11 @@ class MainWindow(QMainWindow):
         self.del_btn = QPushButton("🗑️ Удалить")
         self.del_btn.clicked.connect(self._delete_part)
         
-        self.import_btn = QPushButton("📥 Импорт CSV")
+        self.import_btn = QPushButton(" Импорт CSV")
         self.import_btn.clicked.connect(self._import_csv)
         
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText(" Поиск...")
+        self.search_edit.setPlaceholderText("🔍 Поиск...")
         self.search_edit.textChanged.connect(self._filter_table)
         
         toolbar.addWidget(self.add_btn)
@@ -237,7 +231,20 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.search_edit)
         main_layout.addLayout(toolbar)
         
+        # === ДЕРЕВО КАТЕГОРИЙ + ТАБЛИЦА ===
         splitter = QSplitter(Qt.Horizontal)
+        
+        # Левая панель: Дерево
+        self.tree_view = QTreeView()
+        self.tree_view.setHeaderHidden(True)
+        self.tree_model = QStandardItemModel()
+        self.tree_model.setHorizontalHeaderLabels(["Категории"])
+        self.tree_view.setModel(self.tree_model)
+        self.tree_view.clicked.connect(self._on_category_click)
+        
+        splitter.addWidget(self.tree_view)
+        
+        # Правая панель: Таблица
         self.parts_model = PartsTableModel(self.db)
         self.filter_model = PartsFilterProxyModel()
         self.filter_model.setSourceModel(self.parts_model)
@@ -248,14 +255,61 @@ class MainWindow(QMainWindow):
         self.parts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.parts_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.parts_table.doubleClicked.connect(self._edit_part)
+        
         splitter.addWidget(self.parts_table)
+        splitter.setSizes([250, 950]) # 250px для дерева, остальное для таблицы
         main_layout.addWidget(splitter)
         
         self.status = QStatusBar()
         self.setStatusBar(self.status)
         self._update_status()
     
-    def _filter_table(self, text): self.filter_model.set_search_text(text)
+    def _load_categories(self):
+        """Построение дерева категорий."""
+        self.tree_model.clear()
+        self.tree_model.setHorizontalHeaderLabels(["Категории"])
+        
+        # Корневой элемент
+        root_item = self.tree_model.invisibleRootItem()
+        
+        # Получаем все категории
+        categories = self.db.get_categories()
+        
+        # Создаем словарь для быстрого поиска: ID -> QStandardItem
+        item_map = {}
+        
+        # 1. Создаем элементы
+        for cat in categories:
+            cat_id, name, parent_id = cat
+            item = QStandardItem(name)
+            item.setData(cat_id, Qt.UserRole) # Сохраняем ID в скрытых данных элемента
+            item_map[cat_id] = item
+        
+        # 2. Привязываем дочерние к родителям
+        for cat in categories:
+            cat_id, name, parent_id = cat
+            item = item_map[cat_id]
+            
+            if parent_id is None or parent_id == 0:
+                # Корневая категория
+                root_item.appendRow(item)
+            else:
+                # Вложенная категория
+                parent_item = item_map.get(parent_id)
+                if parent_item:
+                    parent_item.appendRow(item)
+                else:
+                    # Если родитель не найден (ошибка данных), добавляем в корень
+                    root_item.appendRow(item)
+
+    def _on_category_click(self, index):
+        """Обработка клика по дереву."""
+        cat_id = self.tree_model.data(index, Qt.UserRole)
+        self.parts_model.load_data(cat_id)
+        self._update_status()
+
+    def _filter_table(self, text):
+        self.filter_model.set_search_text(text)
     
     def _update_status(self):
         stats = self.db.get_stats()
@@ -272,7 +326,8 @@ class MainWindow(QMainWindow):
                 if cat_id is None: cat_id = self.db.create_category(cat_name)
                 data['category_id'] = cat_id
             self.db.create_part(data)
-            self.parts_model.load_data()
+            self.parts_model.load_data() # Обновляем таблицу
+            self._load_categories() # Обновляем дерево
             self._update_status()
             QMessageBox.information(self, "✅ Успех", "Компонент добавлен!")
     
@@ -289,6 +344,7 @@ class MainWindow(QMainWindow):
             if dialog.exec() == QDialog.Accepted:
                 self.db.update_part(part_id, dialog.get_data())
                 self.parts_model.load_data()
+                self._load_categories()
                 self._update_status()
                 QMessageBox.information(self, "✅ Успех", "Компонент обновлён!")
     
@@ -303,6 +359,7 @@ class MainWindow(QMainWindow):
         if QMessageBox.question(self, "❓ Подтверждение", f"Удалить \"{part_name}\"?\n\nДанные будут перемещены в архив.", QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
             self.db.delete_part(part_id)
             self.parts_model.load_data()
+            self._load_categories()
             self._update_status()
             QMessageBox.information(self, "✅ Успех", "Компонент удалён и архивирован")
 
@@ -315,6 +372,7 @@ class MainWindow(QMainWindow):
                     QApplication.processEvents()
                     imported, errors = import_csv(self.db, file_path)
                     self.parts_model.load_data()
+                    self._load_categories() # Обновляем дерево после импорта
                     self._update_status()
                     QMessageBox.information(self, "Результат", f"✅ Импорт завершен!\nДобавлено: {imported}\nОшибок: {errors}")
                 except Exception as e:
