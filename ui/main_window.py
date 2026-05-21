@@ -48,6 +48,20 @@ class PartDialog(QDialog):
         self.package_combo.setEditable(True)
         self.package_combo.addItems(["0402", "0603", "0805", "1206", "SOT-23", "SOIC-8", "DIP-8", "TQFP-48"])
         
+        # === СОСТОЯНИЕ (ВЫПАДАЮЩИЙ СПИСОК, НЕ РЕДАКТИРУЕМЫЙ) ===
+        self.status_combo = QComboBox()
+        self.status_combo.setEditable(False)  # Нельзя редактировать, только выбирать
+        self.status_combo.addItems([
+            "🛒 Новое",
+            "ℹ️ Б/У проверено",
+            "❓ Б/У не проверено",
+            "✅ Отличное",
+            "✔️ Хорошее",
+            "🚫 Плохое",
+            "❌ Неисправно"
+        ])
+        self.status_combo.setCurrentText("🛒 Новое")
+        
         self.manufacturer_edit = QLineEdit()
         self.part_number_edit = QLineEdit()
         self.quantity_spin = QSpinBox()
@@ -63,7 +77,6 @@ class PartDialog(QDialog):
         location_layout.setContentsMargins(0, 0, 0, 0)
         location_layout.setSpacing(5)
         
-        # Уровень 1: Место (Дом, Гараж...)
         self.location_place_combo = QComboBox()
         self.location_place_combo.setEditable(True)
         self.location_place_combo.setPlaceholderText("Место")
@@ -71,21 +84,18 @@ class PartDialog(QDialog):
         self.location_place_combo.addItems(["", "Дом", "Контора", "Гараж", "Склад"])
         self.location_place_combo.currentTextChanged.connect(self._update_location_containers)
         
-        # Уровень 2: Контейнер (Шкаф, Подвал...)
         self.location_container_combo = QComboBox()
         self.location_container_combo.setEditable(True)
         self.location_container_combo.setPlaceholderText("Контейнер")
         self.location_container_combo.setMinimumWidth(120)
         self.location_container_combo.currentTextChanged.connect(self._update_location_shelves)
         
-        # Уровень 3: Полка/Ящик
         self.location_shelf_combo = QComboBox()
         self.location_shelf_combo.setEditable(True)
         self.location_shelf_combo.setPlaceholderText("Полка/Ящик")
         self.location_shelf_combo.setMinimumWidth(100)
         self.location_shelf_combo.currentTextChanged.connect(self._update_location_sections)
         
-        # Уровень 4: Секция/Номер
         self.location_section_combo = QComboBox()
         self.location_section_combo.setEditable(True)
         self.location_section_combo.setPlaceholderText("Секция/№")
@@ -95,10 +105,6 @@ class PartDialog(QDialog):
         location_layout.addWidget(self.location_container_combo)
         location_layout.addWidget(self.location_shelf_combo)
         location_layout.addWidget(self.location_section_combo)
-        
-        self.status_combo = QComboBox()
-        self.status_combo.addItems(["new", "used", "suspect", "broken"])
-        self.status_combo.setCurrentText("new")
         
         self.image_path_edit = QLineEdit()
         self.image_btn = QPushButton("🖼️ Обзор...")
@@ -119,6 +125,7 @@ class PartDialog(QDialog):
         layout.addRow("Категория", self.category_combo)
         layout.addRow("Тип детали", self.part_type_edit)
         layout.addRow("Корпус", self.package_combo)
+        layout.addRow("📍 Состояние", self.status_combo)  # Состояние после корпуса
         layout.addRow("Производитель", self.manufacturer_edit)
         layout.addRow("Артикул", self.part_number_edit)
         
@@ -128,7 +135,6 @@ class PartDialog(QDialog):
         layout.addRow("Кол-во / Цена", qty_price)
         
         layout.addRow("📍 Место хранения", location_widget)
-        layout.addRow("Статус", self.status_combo)
         
         media_layout = QHBoxLayout()
         media_layout.addWidget(self.image_path_edit)
@@ -153,7 +159,6 @@ class PartDialog(QDialog):
         if path: line_edit.setText(path)
     
     def _update_location_containers(self, place):
-        """Обновляет список контейнеров при смене места."""
         self.location_container_combo.clear()
         self.location_shelf_combo.clear()
         self.location_section_combo.clear()
@@ -171,7 +176,6 @@ class PartDialog(QDialog):
             self.location_container_combo.addItems([""] + sorted(containers))
     
     def _update_location_shelves(self, container):
-        """Обновляет список полок/ящиков при смене контейнера."""
         self.location_shelf_combo.clear()
         self.location_section_combo.clear()
         
@@ -190,7 +194,6 @@ class PartDialog(QDialog):
             self.location_shelf_combo.addItems([""] + sorted(shelves))
 
     def _update_location_sections(self, section):
-        """Обновляет список секций при смене полки."""
         self.location_section_combo.clear()
         
         place = self.location_place_combo.currentText()
@@ -219,31 +222,37 @@ class PartDialog(QDialog):
         self.quantity_spin.setValue(data.get('quantity', 0))
         self.price_spin.setValue(data.get('price', 0))
         
-        # Разбираем место хранения на 4 части
+        # Заполнение состояния
+        status_val = data.get('status', 'Новое')
+        # Ищем точное совпадение или совпадение без эмодзи
+        found = False
+        for i in range(self.status_combo.count()):
+            item_text = self.status_combo.itemText(i)
+            # Убираем эмодзи для сравнения
+            clean_item = item_text.split(' ', 1)[-1] if ' ' in item_text else item_text
+            clean_status = status_val.split(' ', 1)[-1] if ' ' in status_val else status_val
+            if clean_item == clean_status or item_text == status_val:
+                self.status_combo.setCurrentIndex(i)
+                found = True
+                break
+        if not found:
+            self.status_combo.setCurrentIndex(0)
+        
         location = data.get('location', '')
         if location:
             parts = [p.strip() for p in location.split('/')]
-            
-            # Уровень 1
             if len(parts) >= 1:
                 self.location_place_combo.setCurrentText(parts[0])
                 self._update_location_containers(parts[0])
-            
-            # Уровень 2
             if len(parts) >= 2:
                 self.location_container_combo.setCurrentText(parts[1])
                 self._update_location_shelves(parts[1])
-            
-            # Уровень 3
             if len(parts) >= 3:
                 self.location_shelf_combo.setCurrentText(parts[2])
                 self._update_location_sections(parts[2])
-            
-            # Уровень 4
             if len(parts) >= 4:
                 self.location_section_combo.setCurrentText(parts[3])
         
-        self.status_combo.setCurrentText(data.get('status', 'new'))
         self.image_path_edit.setText(data.get('image_path', ''))
         self.datasheet_path_edit.setText(data.get('datasheet_path', ''))
         
@@ -260,16 +269,19 @@ class PartDialog(QDialog):
         self.accept()
     
     def get_location_string(self):
-        """Собирает полный путь из 4 полей."""
         place = self.location_place_combo.currentText().strip()
         container = self.location_container_combo.currentText().strip()
         shelf = self.location_shelf_combo.currentText().strip()
         section = self.location_section_combo.currentText().strip()
-        
         parts = [p for p in [place, container, shelf, section] if p]
         return ' / '.join(parts) if parts else ''
     
     def get_data(self):
+        # Получаем текст состояния и убираем эмодзи для сохранения в БД
+        full_status = self.status_combo.currentText()
+        # Убираем эмодзи (всё до первого пробела)
+        status_value = full_status.split(' ', 1)[-1] if ' ' in full_status else full_status
+        
         return {
             'name': self.name_edit.text().strip(),
             'category': self.category_combo.currentText(),
@@ -280,7 +292,7 @@ class PartDialog(QDialog):
             'quantity': self.quantity_spin.value(),
             'price': self.price_spin.value(),
             'location': self.get_location_string(),
-            'status': self.status_combo.currentText(),
+            'status': status_value,  # Сохраняем без эмодзи
             'image_path': self.image_path_edit.text().strip(),
             'datasheet_path': self.datasheet_path_edit.text().strip(),
             'revision_date': self.revision_date.date().toString("yyyy-MM-dd") if self.revision_date.date().isValid() else None,
@@ -292,29 +304,40 @@ class PartsTableModel(QStandardItemModel):
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
-        self.setHorizontalHeaderLabels(["ID", "Наименование", "Тип", "Корпус", "Кол-во", "Цена", "Место", "Статус"])
+        self.setHorizontalHeaderLabels(["ID", "Наименование", "Тип", "Корпус", "Кол-во", "Цена", "Место", "Состояние"])
         self.load_data()
     
     def load_data(self, category_id=None, filter_type="all", location_path=None):
         self.removeRows(0, self.rowCount())
         parts = self.db.get_all_parts_filtered(category_id, filter_type, location_path)
+        
+        status_colors = {
+            "Новое": ("#c8e6c9", "#000000"),
+            "Б/У проверено": ("#bbdefb", "#000000"),
+            "Б/У не проверено": ("#fff9c4", "#000000"),
+            "Отличное": ("#a5d6a7", "#000000"),
+            "Хорошее": ("#dcedc8", "#000000"),
+            "Плохое": ("#ffcc80", "#000000"),
+            "Неисправно": ("#ffcdd2", "#000000")
+        }
+        
         for p in parts:
             items = [
                 QStandardItem(str(p['id'])), QStandardItem(p['name']),
                 QStandardItem(p['part_type'] or ''), QStandardItem(p['package'] or ''),
                 QStandardItem(str(p['quantity'])), QStandardItem(f"{p['price']:.2f}"),
-                QStandardItem(p['location'] or ''), QStandardItem(p['status'] or 'new')
+                QStandardItem(p['location'] or ''), QStandardItem(p['status'] or 'Новое')
             ]
             qty, status = p['quantity'], p['status']
-            if status == 'broken' or qty == 0:
-                bg, fg = QColor("#ffcdd2"), QColor("#000000")
-            elif qty < 10:
-                bg, fg = QColor("#fff9c4"), QColor("#000000")
-            else:
-                bg, fg = QColor("#c8e6c9"), QColor("#000000")
+            bg, fg = status_colors.get(status, ("#ffffff", "#000000"))
+            
+            # Если нет в наличии, делаем красным независимо от состояния
+            if qty == 0 and status != "Неисправно":
+                bg, fg = "#ffcdd2", "#000000"
+                
             for item in items:
-                item.setBackground(bg)
-                item.setForeground(fg)
+                item.setBackground(QColor(bg))
+                item.setForeground(QColor(fg))
                 item.setEditable(False)
             self.appendRow(items)
 
@@ -333,7 +356,7 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
-        self.setWindowTitle("📦 RadioPartsDB v0.7.0")
+        self.setWindowTitle("📦 RadioPartsDB v0.7.1")
         self.setMinimumSize(1200, 700)
         self.current_filter = "all"
         self.selected_location_path = None

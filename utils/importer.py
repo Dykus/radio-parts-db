@@ -8,7 +8,6 @@ from core.database import Database
 logger = logging.getLogger(__name__)
 
 def guess_encoding(file_path):
-    """Определяет кодировку файла перебором."""
     encodings = ['utf-8-sig', 'utf-8', 'cp1251', 'latin1']
     for enc in encodings:
         try:
@@ -20,14 +19,12 @@ def guess_encoding(file_path):
     return 'utf-8'
 
 def clean_html(text):
-    """Удаляет HTML-теги, оставляя чистый текст."""
     if not text:
         return ""
     clean = re.compile('<.*?>')
     return clean.sub('', text).strip()
 
 def parse_date(date_str):
-    """Преобразует DD.MM.YYYY в YYYY-MM-DD для SQLite."""
     if not date_str:
         return None
     try:
@@ -37,23 +34,26 @@ def parse_date(date_str):
         return None
 
 def map_status(status_str):
-    """Сопоставляет русские статусы Memento с БД."""
+    """Сопоставляет русские/английские статусы с новыми русскими состояниями."""
     if not status_str:
-        return 'new'
+        return 'Новое'
     s = status_str.strip().lower()
-    if s in ['новое', 'new', 'ок', 'исправное']:
-        return 'new'
+    
+    if s in ['новое', 'new', 'ок', 'исправное', 'отличное', 'excellent']:
+        return 'Новое'
+    if s in ['хорошее', 'good']:
+        return 'Хорошее'
     if s.startswith('б/у') or s.startswith('used'):
-        return 'used'
-    if s in ['нет', 'bad', 'плохое', 'broken', 'сломано']:
-        return 'broken'
-    return 'suspect'
+        if 'провер' in s or 'checked' in s:
+            return 'Б/У проверено'
+        return 'Б/У не проверено'
+    if s in ['плохое', 'bad', 'suspect']:
+        return 'Плохое'
+    if s in ['неисправно', 'defective', 'сломано', 'broken', 'нет']:
+        return 'Неисправно'
+    return 'Б/У не проверено'
 
 def import_csv(db: Database, file_path: str) -> tuple:
-    """
-    Импорт CSV из Memento Database.
-    Специально настроен на структуру: Место -> Контейнер -> Ячейка.
-    """
     encoding = guess_encoding(file_path)
     logger.info(f"Определена кодировка: {encoding}")
 
@@ -63,11 +63,9 @@ def import_csv(db: Database, file_path: str) -> tuple:
 
     try:
         with open(file_path, 'r', encoding=encoding, newline='') as f:
-            # Читаем первую строку для определения разделителя и заголовков
             first_line = f.readline()
             delimiter = ';' if ';' in first_line else ','
             
-            # Исправляем дублирующиеся заголовки (Memento часто их дублирует)
             raw_headers = [h.strip().strip('"') for h in csv.reader([first_line], delimiter=delimiter).__next__()]
             unique_headers = []
             seen = {}
@@ -79,7 +77,6 @@ def import_csv(db: Database, file_path: str) -> tuple:
                     seen[h] = 0
                     unique_headers.append(h)
             
-            # Собираем файл обратно в память с исправленным заголовком
             lines = f.readlines()
             fixed_header = delimiter.join([f'"{h}"' for h in unique_headers]) + "\n"
             csv_data = io.StringIO(fixed_header + "".join(lines))
@@ -87,28 +84,30 @@ def import_csv(db: Database, file_path: str) -> tuple:
             reader = csv.DictReader(csv_data, delimiter=delimiter)
             logger.info(f"Обработано колонок: {len(reader.fieldnames)}")
 
-            # Функция безопасного получения данных из строки
             def get_val(key, default=''):
                 val = row.get(key, default)
                 return val.strip().strip('"') if val else default
 
             for i, row in enumerate(reader, start=2):
                 try:
-                    # 1. Формируем полное имя: Радиоэлемент + Тип + Значение + Ед.изм
                     radio = get_val('Радиоэлемент')
                     p_type = get_val('Тип')
                     
-                    # Собираем все пары Значение/Ед.изм (их может быть 1 или 2)
-                    values = [get_val(k) for k in row if 'Значение' in k and get_val(k)]
-                    units = [get_val(k) for k in row if 'Единица измерения' in k and get_val(k)]
-                    full_val = " ".join([f"{v} {u}" for v, u in zip(values, units)]).strip()
+                    val1 = get_val('Значение')
+                    unit1 = get_val('Единица измерения')
+                    val2 = get_val('Значение_1')
+                    unit2 = get_val('Единица измерения_1')
+                    
+                    params = []
+                    if val1: params.append(f"{val1} {unit1}".strip())
+                    if val2: params.append(f"{val2} {unit2}".strip())
+                    full_val = " ".join(params).strip()
                     
                     name = " ".join(filter(None, [radio, p_type, full_val])).strip()
                     if not name:
                         skipped_count += 1
                         continue
 
-                    # 2. Основные поля
                     category = radio if radio else p_type
                     package = get_val('Корпус')
                     manufacturer = get_val('Производитель')
@@ -118,14 +117,10 @@ def import_csv(db: Database, file_path: str) -> tuple:
                     
                     status = map_status(get_val('Состояние'))
                     
-                    # 3. Собираем ТРЕХУРОВНЕВОЕ место хранения
-                    # Это критически важно для работы навигатора!
-                    # Берем колонки: Место, Контейнер, Ячейка
                     place = get_val('Место')
                     container = get_val('Контейнер')
                     cell = get_val('Ячейка')
                     
-                    # Склеиваем их через ' / '
                     location_parts = [p for p in [place, container, cell] if p]
                     location = ' / '.join(location_parts) if location_parts else ''
                     
@@ -134,7 +129,6 @@ def import_csv(db: Database, file_path: str) -> tuple:
                     
                     revision_date = parse_date(get_val('Время ревизии'))
                     
-                    # 4. Описание и заметки (чистим HTML)
                     desc_html = get_val('Описание')
                     notes = clean_html(desc_html)
                     
@@ -142,11 +136,9 @@ def import_csv(db: Database, file_path: str) -> tuple:
                     if specs:
                         notes += f"\nРазмеры: {specs}" if notes else f"Размеры: {specs}"
                     
-                    # 5. Ссылки и пути
                     datasheet = get_val('Ссылка на даташит') or get_val('Datasheed') or get_val('Ссылка в сеть')
                     image = get_val('Внешний вид') or get_val('По фото')
                     
-                    # 6. Подготовка данных для БД
                     part_data = {
                         'name': name,
                         'category': category,
@@ -155,7 +147,7 @@ def import_csv(db: Database, file_path: str) -> tuple:
                         'manufacturer': manufacturer,
                         'quantity': quantity,
                         'price': price,
-                        'location': location, # Сохраняем строку вида "Дом / Подвал / Ячейка"
+                        'location': location,
                         'status': status,
                         'revision_date': revision_date,
                         'notes': notes,
@@ -163,7 +155,6 @@ def import_csv(db: Database, file_path: str) -> tuple:
                         'datasheet_path': datasheet
                     }
                     
-                    # 7. Обработка категории (авто-создание если нет)
                     cat_id = None
                     if category:
                         cats = db.get_categories()
@@ -172,11 +163,10 @@ def import_csv(db: Database, file_path: str) -> tuple:
                             cat_id = db.create_category(category)
                         part_data['category_id'] = cat_id
                     
-                    # 8. Сохранение в БД
                     db.create_part(part_data)
                     imported_count += 1
                     
-                    if imported_count <= 3:
+                    if imported_count <= 5:
                         logger.info(f"✅ Строка {i}: добавлен '{name}' -> {location}")
 
                 except Exception as e:

@@ -57,13 +57,14 @@ class Database:
                 UNIQUE(type, value)
             )""")
             
+            # Убран CHECK constraint для status, чтобы поддерживать расширенные русские значения
             cursor.execute("""CREATE TABLE IF NOT EXISTS parts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 category_id INTEGER,
                 part_type TEXT, package TEXT, manufacturer TEXT, part_number TEXT,
                 quantity INTEGER DEFAULT 0, price REAL DEFAULT 0, location TEXT,
-                status TEXT DEFAULT 'new' CHECK(status IN ('new', 'used', 'suspect', 'broken')),
+                status TEXT DEFAULT 'Новое',
                 image_path TEXT, datasheet_path TEXT, notes TEXT,
                 revision_date DATE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -106,10 +107,9 @@ class Database:
             )""")
             
             cursor.execute("""INSERT OR IGNORE INTO dictionaries (type, value) VALUES 
-                ('status', 'new'), ('status', 'used'), ('status', 'suspect'), ('status', 'broken')
+                ('status', 'Новое'), ('status', 'Б/У проверено'), ('status', 'Б/У не проверено'),
+                ('status', 'Отличное'), ('status', 'Хорошее'), ('status', 'Плохое'), ('status', 'Неисправно')
             """)
-
-    # ==================== ПОИСК И ФИЛЬТРАЦИЯ ====================
 
     def get_all_parts_filtered(self, category_id=None, filter_type="all", location_path=None) -> List[Dict[str, Any]]:
         with self.get_cursor() as cursor:
@@ -125,11 +125,9 @@ class Database:
             elif filter_type == "low_stock":
                 query += " AND quantity > 0 AND quantity < 10"
             elif filter_type == "out_of_stock":
-                query += " AND (quantity = 0 OR status = 'broken')"
+                query += " AND (quantity = 0 OR status = 'Неисправно')"
             
-            # ✅ ИСПРАВЛЕНИЕ: Фильтрация по месту
             if location_path:
-                # Ищем строки, которые НАЧИНАЮТСЯ с выбранного пути (например, "Дом / Шкаф%")
                 query += " AND location LIKE ?"
                 params.append(f"{location_path}%")
             
@@ -170,8 +168,6 @@ class Database:
                 'out_of_stock': out_of_stock
             }
 
-    # ==================== CRUD ====================
-
     def create_part(self, data: Dict[str, Any]) -> int:
         with self.get_cursor() as cursor:
             cursor.execute("""
@@ -182,7 +178,7 @@ class Database:
                 data['name'], data.get('category_id'), data.get('part_type'),
                 data.get('package'), data.get('manufacturer'), data.get('part_number'),
                 data.get('quantity', 0), data.get('price', 0), data.get('location'),
-                data.get('status', 'new'), data.get('image_path'),
+                data.get('status', 'Новое'), data.get('image_path'),
                 data.get('datasheet_path'), data.get('notes'), data.get('revision_date')
             ))
             return cursor.lastrowid
@@ -205,7 +201,7 @@ class Database:
                 data['name'], data.get('part_type'), data.get('package'),
                 data.get('manufacturer'), data.get('part_number'),
                 data.get('quantity', 0), data.get('price', 0), data.get('location'),
-                data.get('status', 'new'), data.get('image_path'),
+                data.get('status', 'Новое'), data.get('image_path'),
                 data.get('datasheet_path'), data.get('notes'), data.get('revision_date'), part_id
             ))
 
@@ -218,26 +214,15 @@ class Database:
         with self.get_cursor() as cursor:
             cursor.execute("DELETE FROM parts WHERE id = ?", (part_id,))
 
-    # ==================== НАВИГАТОР ПО МЕСТАМ ====================
-
     def get_location_tree(self) -> dict:
-        """
-        Строит дерево из базы данных.
-        Разделяет путь "Дом / Шкаф / Ящик" на вложенные элементы.
-        """
         tree = {}
         with self.get_cursor() as cursor:
-            # Получаем уникальные пути
             cursor.execute("SELECT DISTINCT location FROM parts WHERE location IS NOT NULL AND length(trim(location)) > 0")
             rows = cursor.fetchall()
-            
             for row in rows:
                 loc = row[0].strip()
                 if not loc: continue
-                
-                # Разделяем по слэшу. "Дом / Шкаф" -> ['Дом', 'Шкаф']
                 parts = [p.strip() for p in loc.split('/') if p.strip()]
-                
                 current_level = tree
                 for part in parts:
                     if part not in current_level:
