@@ -41,6 +41,70 @@ class Database:
 
     def init_schema(self):
         with self.get_cursor() as cursor:
+            # === ЛОГИКА МИГРАЦИИ ДЛЯ ТАБЛИЦЫ PARTS ===
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='parts'")
+            table_exists = cursor.fetchone() is not None
+            
+            needs_recreate = False
+            
+            if table_exists:
+                # Проверяем SQL-код создания таблицы на наличие старых ограничений
+                cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='parts'")
+                create_sql = cursor.fetchone()[0]
+                
+                # Если найдено старое ограничение на английские статусы -> нужно пересоздать таблицу
+                if create_sql and "status IN ('new', 'used', 'suspect', 'broken')" in create_sql:
+                    logger.info("⚠️ Обнаружена устаревшая схема БД (английские статусы). Выполняется автоматическая миграция...")
+                    needs_recreate = True
+
+            if needs_recreate:
+                try:
+                    # 1. Создаем копию данных
+                    cursor.execute("CREATE TABLE parts_backup AS SELECT * FROM parts")
+                    # 2. Удаляем старую таблицу
+                    cursor.execute("DROP TABLE parts")
+                    # 3. Создаем новую таблицу с правильной схемой (без жесткого CHECK)
+                    cursor.execute("""CREATE TABLE parts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        category_id INTEGER,
+                        part_type TEXT, package TEXT, manufacturer TEXT, part_number TEXT,
+                        quantity INTEGER DEFAULT 0, price REAL DEFAULT 0, location TEXT,
+                        status TEXT DEFAULT 'Новое',
+                        image_path TEXT, datasheet_path TEXT, notes TEXT,
+                        revision_date DATE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
+                    )""")
+                    # 4. Переносим данные
+                    cursor.execute("""
+                        INSERT INTO parts 
+                        SELECT id, name, category_id, part_type, package, manufacturer, part_number,
+                               quantity, price, location, status, image_path, datasheet_path, notes,
+                               revision_date, created_at, updated_at 
+                        FROM parts_backup
+                    """)
+                    # 5. Удаляем копию
+                    cursor.execute("DROP TABLE parts_backup")
+                    logger.info("✅ Структура таблицы 'parts' обновлена.")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка миграции: {e}")
+                    raise
+
+            # === ПЕРЕВОД СТАТУСОВ (САМОЕ ВАЖНОЕ) ===
+            # Эта часть выполняется всегда при запуске, чтобы гарантировать, что все статусы русские.
+            # Если таблица была только что пересоздана, данные уже внутри.
+            # Если таблица была новой, это просто лишняя проверка (ничего не изменится).
+            logger.info("🔄 Проверка и перевод статусов на русские...")
+            cursor.execute("UPDATE parts SET status = 'Новое' WHERE status = 'new'")
+            cursor.execute("UPDATE parts SET status = 'Б/У проверено' WHERE status = 'used'")
+            cursor.execute("UPDATE parts SET status = 'Б/У не проверено' WHERE status = 'suspect'")
+            cursor.execute("UPDATE parts SET status = 'Неисправно' WHERE status = 'broken'")
+            
+            # === СОЗДАНИЕ ОСТАЛЬНЫХ ТАБЛИЦ (ЕСЛИ ИХ НЕТ) ===
+            
+            # Категории
             cursor.execute("""CREATE TABLE IF NOT EXISTS categories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -50,45 +114,23 @@ class Database:
                 FOREIGN KEY (parent_id) REFERENCES categories(id) ON DELETE CASCADE
             )""")
             
+            # Справочники
             cursor.execute("""CREATE TABLE IF NOT EXISTS dictionaries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                type TEXT NOT NULL CHECK(type IN ('location', 'package', 'status')),
+                type TEXT NOT NULL,
                 value TEXT NOT NULL,
                 UNIQUE(type, value)
             )""")
             
-            # Убран CHECK constraint для status, чтобы поддерживать расширенные русские значения
-            cursor.execute("""CREATE TABLE IF NOT EXISTS parts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                category_id INTEGER,
-                part_type TEXT, package TEXT, manufacturer TEXT, part_number TEXT,
-                quantity INTEGER DEFAULT 0, price REAL DEFAULT 0, location TEXT,
-                status TEXT DEFAULT 'Новое',
-                image_path TEXT, datasheet_path TEXT, notes TEXT,
-                revision_date DATE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
-            )""")
-            
-            try:
-                cursor.execute("ALTER TABLE parts ADD COLUMN notes TEXT")
-            except sqlite3.OperationalError:
-                pass
-            
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_name ON parts(name)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_category ON parts(category_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_status ON parts(status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_location ON parts(location)")
-            
+            # Проекты
             cursor.execute("""CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE, description TEXT,
-                status TEXT DEFAULT 'open' CHECK(status IN ('open', 'closed')),
+                status TEXT DEFAULT 'open',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""")
             
+            # Связь проектов и деталей
             cursor.execute("""CREATE TABLE IF NOT EXISTS project_parts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL, part_id INTEGER NOT NULL,
@@ -99,6 +141,7 @@ class Database:
                 UNIQUE(project_id, part_id)
             )""")
             
+            # Архив
             cursor.execute("""CREATE TABLE IF NOT EXISTS parts_archive (
                 id INTEGER PRIMARY KEY,
                 part_data TEXT NOT NULL,
@@ -106,17 +149,26 @@ class Database:
                 reason TEXT
             )""")
             
+            # Индексы для ускорения поиска
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_name ON parts(name)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_category ON parts(category_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_status ON parts(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_location ON parts(location)")
+            
+            # Заполняем справочник статусов по умолчанию
             cursor.execute("""INSERT OR IGNORE INTO dictionaries (type, value) VALUES 
                 ('status', 'Новое'), ('status', 'Б/У проверено'), ('status', 'Б/У не проверено'),
                 ('status', 'Отличное'), ('status', 'Хорошее'), ('status', 'Плохое'), ('status', 'Неисправно')
             """)
+
+    # ==================== ПОИСК И ФИЛЬТРАЦИЯ ====================
 
     def get_all_parts_filtered(self, category_id=None, filter_type="all", location_path=None) -> List[Dict[str, Any]]:
         with self.get_cursor() as cursor:
             query = "SELECT id, name, part_type, package, quantity, price, location, status FROM parts WHERE 1=1"
             params = []
             
-            if category_id:
+            if category_id is not None:
                 query += " AND category_id = ?"
                 params.append(category_id)
             
@@ -167,6 +219,8 @@ class Database:
                 'total_value': round(total_value, 2),
                 'out_of_stock': out_of_stock
             }
+
+    # ==================== CRUD ====================
 
     def create_part(self, data: Dict[str, Any]) -> int:
         with self.get_cursor() as cursor:
