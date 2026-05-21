@@ -628,6 +628,10 @@ class MainWindow(QMainWindow):
                 if cat_id is None: cat_id = self.db.create_category(cat_name)
                 data['category_id'] = cat_id
             self.db.create_part(data)
+            
+            # ✅ ДОБАВЛЕНО: Обновляем дерево мест
+            self._load_locations()
+            
             self._refresh_table()
             self._load_categories()
             self._load_locations()
@@ -645,6 +649,10 @@ class MainWindow(QMainWindow):
             dialog = PartDialog(self, part_data=part, db=self.db)
             if dialog.exec() == QDialog.Accepted:
                 self.db.update_part(part_id, dialog.get_data())
+                
+                # ✅ ДОБАВЛЕНО: Обновляем дерево мест, если добавлено новое место (например, Гараж)
+                self._load_locations() 
+                
                 self._refresh_table()
                 self._load_categories()
                 self._update_status()
