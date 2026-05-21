@@ -10,6 +10,7 @@ from PySide6.QtGui import QPixmap
 logger = logging.getLogger(__name__)
 
 class InfoPanelWidget(QWidget):
+    """Правая панель: Предпросмотр фото и Навигатор по местам."""
     location_clicked = Signal(str)
 
     def __init__(self, db, parent=None):
@@ -23,14 +24,13 @@ class InfoPanelWidget(QWidget):
 
         # --- Секция фото ---
         photo_label = QLabel("🖼️ Предпросмотр")
-        # Убрали жесткий цвет, пусть будет системный
-        photo_label.setStyleSheet("font-size: 12px; font-weight: bold;") 
+        photo_label.setStyleSheet("font-size: 12px; font-weight: bold;")
         layout.addWidget(photo_label)
 
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setMinimumHeight(200)
-        # Убрали белый фон, сделали нейтральный серый (как в main_window)
+        self.image_label.setMinimumHeight(150)
+        self.image_label.setMaximumHeight(220)  # 🔒 Ограничиваем высоту, чтобы не вытеснять дерево
         self.image_label.setStyleSheet(
             "QLabel { background-color: palette(mid); border: 1px solid palette(dark); border-radius: 3px; color: palette(text); }"
         )
@@ -39,22 +39,22 @@ class InfoPanelWidget(QWidget):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(self.image_label)
+        scroll_area.setMaximumHeight(240)  # 🔒 Фиксируем максимум области скролла
         layout.addWidget(scroll_area)
 
         self.info_label = QLabel("")
         self.info_label.setWordWrap(True)
-        self.info_label.setStyleSheet("padding: 5px; font-size: 11px;") # Системный цвет текста
+        self.info_label.setStyleSheet("padding: 5px; font-size: 11px;")
         layout.addWidget(self.info_label)
 
         # --- Секция навигатора ---
         location_label = QLabel("📍 Навигатор по местам")
-        location_label.setStyleSheet("font-size: 12px; font-weight: bold; margin-top: 10px;")
+        location_label.setStyleSheet("font-size: 12px; font-weight: bold; margin-top: 5px;")
         layout.addWidget(location_label)
 
         self.location_tree = QTreeWidget()
         self.location_tree.setHeaderHidden(True)
-        # Убрали жесткий белый фон (#ffffff) и черный текст. 
-        # Теперь используем palette(base) и palette(text), что адаптируется под тему.
+        self.location_tree.setMinimumHeight(150)  # 🔒 Гарантируем место для дерева
         self.location_tree.setStyleSheet(
             "QTreeWidget { background-color: palette(base); border: 1px solid palette(mid); color: palette(text); }"
             "QTreeWidget::item:hover { background-color: palette(highlight); color: palette(highlighted-text); }"
@@ -62,6 +62,9 @@ class InfoPanelWidget(QWidget):
         )
         self.location_tree.itemClicked.connect(self._on_tree_click)
         layout.addWidget(self.location_tree)
+        
+        # Растягиваем дерево, чтобы оно занимало всё оставшееся место
+        layout.setStretchFactor(self.location_tree, 10)
 
     def _on_tree_click(self, item, column):
         path_parts = []
@@ -149,7 +152,6 @@ class InfoPanelWidget(QWidget):
             self.image_label.setPixmap(
                 pixmap.scaled(self.image_label.size() - QSize(20, 20), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             )
-            # Стиль при загрузке картинки (нейтральный)
             self.image_label.setStyleSheet(
                 "QLabel { background-color: palette(base); border: 1px solid palette(mid); border-radius: 3px; padding: 5px; }"
             )
