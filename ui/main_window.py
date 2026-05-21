@@ -24,7 +24,7 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
-        self.setWindowTitle("📦 RadioPartsDB v0.11.0")
+        self.setWindowTitle("📦 RadioPartsDB v0.12.0")
         self.setMinimumSize(1200, 700)
         self.current_filter = "all"
         self.selected_location_path = None
@@ -104,22 +104,25 @@ class MainWindow(QMainWindow):
         self.status = QStatusBar(); self.setStatusBar(self.status)
         self._update_status()
 
-    def _on_all_filter(self):
-        """Кнопка 'Все' сбрасывает и статус, и категорию."""
-        self._apply_filter("all")
-        self.selected_category_id = None
-        self.category_tree._on_show_all_clicked()
-        self._refresh_table()
-        self._update_status()
-
     def _apply_filter(self, filter_type):
+        """Применяет фильтр наличия и СРАЗУ обновляет таблицу."""
         self.current_filter = filter_type
         for btn in [self.filter_all_btn, self.filter_stock_btn, self.filter_low_btn, self.filter_out_btn]:
             btn.setChecked(False)
+        
         if filter_type == "all": self.filter_all_btn.setChecked(True)
         elif filter_type == "in_stock": self.filter_stock_btn.setChecked(True)
         elif filter_type == "low_stock": self.filter_low_btn.setChecked(True)
         elif filter_type == "out_of_stock": self.filter_out_btn.setChecked(True)
+
+        self._refresh_table()  # ✅ ИСПРАВЛЕНО: мгновенное обновление
+        self._update_status()
+
+    def _on_all_filter(self):
+        """Кнопка 'Все' сбрасывает и категорию, и фильтр наличия."""
+        self.selected_category_id = None
+        self.category_tree._on_show_all_clicked()
+        self._apply_filter("all")
 
     def _on_category_selected(self, cat_id):
         self.selected_category_id = cat_id
@@ -150,7 +153,7 @@ class MainWindow(QMainWindow):
     def _refresh_all(self):
         """Обновляет ВСЕ компоненты: категории, места, таблицу."""
         self.category_tree.load_categories()
-        self.right_panel.load_tree()  # ✅ ИСПРАВЛЕНО: Загружаем дерево мест!
+        self.right_panel.load_tree()
         self._refresh_table()
         self._update_status()
 
@@ -200,7 +203,7 @@ class MainWindow(QMainWindow):
         if f:
             try:
                 imp, err = import_csv(self.db, f)
-                self._refresh_all()  # ✅ Теперь после импорта загрузится и дерево мест
+                self._refresh_all()
                 QMessageBox.information(self, "Импорт", f"Добавлено: {imp}, Ошибок: {err}")
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", str(e))

@@ -17,14 +17,14 @@ class PartsTableModel(QStandardItemModel):
         self.removeRows(0, self.rowCount())
         parts = self.db.get_all_parts_filtered(category_id, filter_type, location_path)
         
-        status_colors = {
-            "Новое": ("#c8e6c9", "#000000"),
-            "Б/У проверено": ("#bbdefb", "#000000"),
-            "Б/У не проверено": ("#fff9c4", "#000000"),
-            "Отличное": ("#a5d6a7", "#000000"),
-            "Хорошее": ("#dcedc8", "#000000"),
-            "Плохое": ("#ffcc80", "#000000"),
-            "Неисправно": ("#ffcdd2", "#000000")
+        # 🎨 Цвета конкретно для ячейки "Состояние"
+        status_cell_colors = {
+            "Новое": ("#a5d6a7", "#000000"),          # Светло-зелёный
+            "Отличное": ("#a5d6a7", "#000000"),       # Светло-зелёный
+            "Б/У проверено": ("#90caf9", "#000000"),  # Голубой
+            "Б/У не проверено": ("#fff59d", "#000000"),# Жёлтый
+            "Плохое": ("#ffcc80", "#000000"),         # Оранжевый
+            "Неисправно": ("#ef9a9a", "#000000")      # Красный
         }
         
         for p in parts:
@@ -34,16 +34,30 @@ class PartsTableModel(QStandardItemModel):
                 QStandardItem(str(p['quantity'])), QStandardItem(f"{p['price']:.2f}"),
                 QStandardItem(p['location'] or ''), QStandardItem(p['status'] or 'Новое')
             ]
-            qty, status = p['quantity'], p['status']
-            bg, fg = status_colors.get(status, ("#ffffff", "#000000"))
             
-            if qty == 0 and status != "Неисправно":
-                bg, fg = "#ffcdd2", "#000000"
-                
+            qty = p['quantity']
+            status = p['status']
+            
+            # 1️⃣ Цвет фона ВСЕЙ СТРОКИ зависит от количества
+            if qty == 0:
+                row_bg, row_fg = QColor("#ffcdd2"), QColor("#000000")  # 🔴 Красный (нет)
+            elif qty < 10:
+                row_bg, row_fg = QColor("#fff9c4"), QColor("#000000")  # 🟡 Жёлтый (мало)
+            else:
+                row_bg, row_fg = QColor("#c8e6c9"), QColor("#000000")  # 🟢 Зелёный (много)
+            
+            # Применяем цвет строки ко всем ячейкам
             for item in items:
-                item.setBackground(QColor(bg))
-                item.setForeground(QColor(fg))
+                item.setBackground(row_bg)
+                item.setForeground(row_fg)
                 item.setEditable(False)
+            
+            # 2️⃣ Переопределяем цвет ТОЛЬКО для ячейки "Состояние" (индекс 7)
+            status_bg, status_fg = status_cell_colors.get(status, ("#e0e0e0", "#000000"))
+            status_item = items[7]
+            status_item.setBackground(QColor(status_bg))
+            status_item.setForeground(QColor(status_fg))
+            
             self.appendRow(items)
 
 
@@ -60,9 +74,8 @@ class PartsFilterProxyModel(QSortFilterProxyModel):
 class PartsTableWidget(QWidget):
     """
     Виджет центральной таблицы компонентов.
-    Отвечает за отображение, фильтрацию и цветовую индикацию.
+    Отвечает за отображение, фильтрацию, сортировку и цветовую индикацию.
     """
-    # Сигнал: передается ID выбранной детали
     selection_changed = Signal(int)
     double_clicked = Signal(int)
 
@@ -83,7 +96,16 @@ class PartsTableWidget(QWidget):
         self.table_view.setModel(self.proxy_model)
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        
+        # ✅ Сортировка по клику на заголовки
+        self.table_view.setSortingEnabled(True)
+        self.table_view.horizontalHeader().setSortIndicatorShown(True)
+        
+        # ✅ Ручное изменение ширины колонок
+        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        
+        # ✅ СКРЫВАЕМ КОЛОНКУ ID (индекс 0)
+        self.table_view.hideColumn(0)
 
         # Связываем сигналы
         self.table_view.selectionModel().selectionChanged.connect(self._on_selection)
@@ -94,11 +116,11 @@ class PartsTableWidget(QWidget):
     def _on_selection(self, selected, deselected):
         indexes = self.table_view.selectionModel().selectedRows()
         if not indexes:
-            self.selection_changed.emit(0) # 0 означает "ничего не выбрано"
+            self.selection_changed.emit(0)
             return
         
         row = indexes[0].row()
-        # Получаем ID из первой колонки (ID) через proxy модель
+        # Получаем ID из скрытой колонки 0
         part_id = int(self.proxy_model.data(self.proxy_model.index(row, 0)))
         self.selection_changed.emit(part_id)
 
