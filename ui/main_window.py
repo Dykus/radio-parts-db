@@ -1,15 +1,16 @@
 # ui/main_window.py
 import os
 import logging
+import json
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTreeView, QTableView, QHeaderView, QPushButton, QLineEdit,
     QStatusBar, QLabel, QDialog, QFormLayout, QComboBox, 
     QSpinBox, QDoubleSpinBox, QDateTimeEdit, QTextEdit,
     QDialogButtonBox, QAbstractItemView, QMessageBox, QFileDialog,
-    QScrollArea, QTreeWidget, QTreeWidgetItem, QStyle
+    QScrollArea, QTreeWidget, QTreeWidgetItem, QStyle, QSizePolicy
 )
-from PySide6.QtCore import Qt, QSortFilterProxyModel, QRegularExpression, QSize, QDate
+from PySide6.QtCore import Qt, QSortFilterProxyModel, QRegularExpression, QSize, QDate, QRect
 from PySide6.QtGui import QColor, QStandardItemModel, QStandardItem, QRegularExpressionValidator, QPixmap, QIcon
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 from core.database import Database
 from utils.importer import import_csv
 
+# Файл для сохранения настроек окна
+SETTINGS_FILE = "window_settings.json"
 
 class PartDialog(QDialog):
     def __init__(self, parent=None, part_data=None, db=None):
@@ -279,14 +282,47 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
-        self.setWindowTitle("📦 RadioPartsDB v0.5.0")
-        self.setMinimumSize(1400, 800)
+        self.setWindowTitle("📦 RadioPartsDB v0.6.1")
+        self.setMinimumSize(1200, 700)
         self.current_filter = "all"
         self.selected_location_path = None
+        
+        # Загрузка настроек окна
+        self._load_window_settings()
+        
         self._init_ui()
         self._load_categories()
         self._load_locations()
     
+    def _load_window_settings(self):
+        """Загружает позицию и размер окна из файла."""
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, 'r') as f:
+                    settings = json.load(f)
+                    geom = settings.get('geometry')
+                    if geom:
+                        self.setGeometry(QRect(*geom))
+            except Exception as e:
+                logger.warning(f"Не удалось загрузить настройки окна: {e}")
+
+    def _save_window_settings(self):
+        """Сохраняет позицию и размер окна в файл."""
+        try:
+            geom = self.geometry()
+            settings = {
+                'geometry': [geom.x(), geom.y(), geom.width(), geom.height()]
+            }
+            with open(SETTINGS_FILE, 'w') as f:
+                json.dump(settings, f)
+        except Exception as e:
+            logger.warning(f"Не удалось сохранить настройки окна: {e}")
+
+    def closeEvent(self, event):
+        """Вызывается при закрытии окна."""
+        self._save_window_settings()
+        super().closeEvent(event)
+
     def _init_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
@@ -371,13 +407,21 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(5, 5, 5, 5)
         
         photo_label = QLabel("🖼️ Предпросмотр")
-        photo_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #aaa;")
+        photo_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #555;") # ✅ Исправлен цвет текста
         right_layout.addWidget(photo_label)
         
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setMinimumHeight(200)
-        self.image_label.setStyleSheet("background-color: #2b2b2b; border: 1px solid #444; border-radius: 3px; color: #888;")
+        # ✅ Исправлены цвета на нейтральные/системные
+        self.image_label.setStyleSheet("""
+            QLabel { 
+                background-color: #f0f0f0; 
+                border: 1px solid #ccc; 
+                border-radius: 3px; 
+                color: #888; 
+            }
+        """)
         self.image_label.setText("")
         
         scroll_area = QScrollArea()
@@ -387,19 +431,24 @@ class MainWindow(QMainWindow):
         
         self.info_label = QLabel("")
         self.info_label.setWordWrap(True)
-        self.info_label.setStyleSheet("color: #aaa; padding: 5px; font-size: 11px;")
+        self.info_label.setStyleSheet("color: #333; padding: 5px; font-size: 11px;") # ✅ Исправлен цвет текста
         right_layout.addWidget(self.info_label)
 
         location_label = QLabel("📍 Навигатор по местам")
-        location_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #aaa; margin-top: 10px;")
+        location_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #555; margin-top: 10px;") # ✅ Исправлен цвет текста
         right_layout.addWidget(location_label)
         
         self.location_tree = QTreeWidget()
         self.location_tree.setHeaderHidden(True)
+        # ✅ Исправлены стили дерева под светлую тему
         self.location_tree.setStyleSheet("""
-            QTreeWidget { background-color: #1e1e1e; border: 1px solid #444; color: white; }
-            QTreeWidget::item:hover { background-color: #333; }
-            QTreeWidget::item:selected { background-color: #0055aa; }
+            QTreeWidget { 
+                background-color: #ffffff; 
+                border: 1px solid #ccc; 
+                color: #000000; 
+            }
+            QTreeWidget::item:hover { background-color: #e5f3ff; }
+            QTreeWidget::item:selected { background-color: #0078d7; color: white; }
         """)
         self.location_tree.itemClicked.connect(self._on_location_click)
         right_layout.addWidget(self.location_tree)
@@ -434,7 +483,6 @@ class MainWindow(QMainWindow):
             return self.tree_model.data(indexes[0], Qt.UserRole)
         return None
     
-    # ✅ ОБНОВЛЁН: Подсветка места в дереве при клике на деталь
     def _on_selection_changed(self, selected, deselected):
         indexes = self.parts_table.selectionModel().selectedRows()
         if not indexes:
@@ -453,7 +501,6 @@ class MainWindow(QMainWindow):
             self._clear_image_preview()
             self.location_tree.clearSelection()
 
-    # ✅ НОВЫЙ: Автоматический поиск и выделение пути в дереве мест
     def _highlight_location_in_tree(self, location_path):
         if not location_path or not location_path.strip():
             self.location_tree.clearSelection()
@@ -464,7 +511,6 @@ class MainWindow(QMainWindow):
             self.location_tree.clearSelection()
             return
 
-        # Начинаем с корня "🏠 Все места"
         root = self.location_tree.topLevelItem(0)
         if not root:
             return
@@ -527,7 +573,8 @@ class MainWindow(QMainWindow):
             scaled_pixmap = pixmap.scaled(self.image_label.size() - QSize(20, 20), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.image_label.setPixmap(scaled_pixmap)
             self.image_label.setText("")
-            self.image_label.setStyleSheet("QLabel { background-color: #1e1e1e; border: 1px solid #444; border-radius: 3px; padding: 5px; }")
+            # ✅ Цвет фона картинки при загрузке остается нейтральным
+            self.image_label.setStyleSheet("QLabel { background-color: #f0f0f0; border: 1px solid #ccc; border-radius: 3px; padding: 5px; }")
         else:
             self._clear_image_preview()
             return
@@ -540,7 +587,8 @@ class MainWindow(QMainWindow):
     
     def _clear_image_preview(self):
         self.image_label.setText("📷")
-        self.image_label.setStyleSheet("background-color: #2b2b2b; border: 1px solid #444; border-radius: 3px; color: #888;")
+        # ✅ Возвращаем нейтральный стиль заглушки
+        self.image_label.setStyleSheet("background-color: #f0f0f0; border: 1px solid #ccc; border-radius: 3px; color: #888;")
         self.image_label.setPixmap(QPixmap())
         self.info_label.setText("")
     
@@ -629,12 +677,10 @@ class MainWindow(QMainWindow):
                 data['category_id'] = cat_id
             self.db.create_part(data)
             
-            # ✅ ДОБАВЛЕНО: Обновляем дерево мест
             self._load_locations()
             
             self._refresh_table()
             self._load_categories()
-            self._load_locations()
             QMessageBox.information(self, "✅ Успех", "Компонент добавлен!")
     
     def _edit_part(self):
@@ -650,8 +696,7 @@ class MainWindow(QMainWindow):
             if dialog.exec() == QDialog.Accepted:
                 self.db.update_part(part_id, dialog.get_data())
                 
-                # ✅ ДОБАВЛЕНО: Обновляем дерево мест, если добавлено новое место (например, Гараж)
-                self._load_locations() 
+                self._load_locations()
                 
                 self._refresh_table()
                 self._load_categories()
