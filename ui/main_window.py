@@ -33,22 +33,70 @@ class MainWindow(QMainWindow):
         self._load_window_settings()
         self._init_ui()
         self._refresh_all()
+        
+        # Применяем сохранённые настройки после создания UI
+        self._apply_saved_settings()
     
     def _load_window_settings(self):
+        """Загружает настройки из JSON файла."""
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, 'r') as f:
-                    geom = json.load(f).get('geometry')
-                    if geom: self.setGeometry(QRect(*geom))
-            except Exception as e: logger.warning(f"Ошибка загрузки настроек: {e}")
+                    self.saved_settings = json.load(f)
+                logger.info(f"✅ Загружены настройки из {SETTINGS_FILE}")
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки настроек: {e}")
+                self.saved_settings = {}
+        else:
+            self.saved_settings = {}
 
     def _save_window_settings(self):
+        """Сохраняет все настройки: окно, сплиттеры, колонки."""
         try:
+            settings = {
+                # Позиция и размер окна
+                'geometry': [self.geometry().x(), self.geometry().y(), self.width(), self.height()],
+                
+                # Позиции разделителей (сплиттеров)
+                'main_splitter_sizes': self.main_splitter.sizes(),
+                
+                # Ширина колонок таблицы
+                'table_column_widths': [
+                    self.parts_table.table_view.horizontalHeader().sectionSize(i)
+                    for i in range(8)  # 8 видимых колонок
+                ]
+            }
+            
             with open(SETTINGS_FILE, 'w') as f:
-                json.dump({'geometry': [self.geometry().x(), self.geometry().y(), self.width(), self.height()]}, f)
-        except Exception as e: logger.warning(f"Ошибка сохранения настроек: {e}")
+                json.dump(settings, f, indent=2)
+            logger.info(f"💾 Настройки сохранены в {SETTINGS_FILE}")
+        except Exception as e:
+            logger.warning(f"Ошибка сохранения настроек: {e}")
+
+    def _apply_saved_settings(self):
+        """Применяет сохранённые настройки к интерфейсу."""
+        if not self.saved_settings:
+            return
+        
+        # Применяем размеры сплиттера
+        if 'main_splitter_sizes' in self.saved_settings:
+            sizes = self.saved_settings['main_splitter_sizes']
+            # Проверяем, что размеры валидны
+            if len(sizes) == 3 and all(s > 0 for s in sizes):
+                self.main_splitter.setSizes(sizes)
+                logger.info("✅ Применены размеры панелей")
+        
+        # Применяем ширину колонок таблицы
+        if 'table_column_widths' in self.saved_settings:
+            widths = self.saved_settings['table_column_widths']
+            header = self.parts_table.table_view.horizontalHeader()
+            for i, width in enumerate(widths):
+                if width > 0:  # Только положительные значения
+                    header.resizeSection(i, width)
+            logger.info("✅ Применена ширина колонок")
 
     def closeEvent(self, event):
+        """Сохраняет настройки при закрытии программы."""
         self._save_window_settings()
         super().closeEvent(event)
 
@@ -79,27 +127,27 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(toolbar)
         
         # --- Main Splitter ---
-        main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter = QSplitter(Qt.Horizontal)  # ✅ Сохраняем ссылку на сплиттер
         
         # 1. Левая панель: Категории
         self.category_tree = CategoryTreeWidget(self.db)
         self.category_tree.category_selected.connect(self._on_category_selected)
         self.category_tree.categories_changed.connect(self._refresh_all)
-        main_splitter.addWidget(self.category_tree)
+        self.main_splitter.addWidget(self.category_tree)
         
         # 2. Центральная панель: Таблица
         self.parts_table = PartsTableWidget(self.db)
         self.parts_table.selection_changed.connect(self._on_selection_changed)
         self.parts_table.double_clicked.connect(self._edit_part_by_id)
-        main_splitter.addWidget(self.parts_table)
+        self.main_splitter.addWidget(self.parts_table)
         
         # 3. Правая панель: Фото + Навигатор
         self.right_panel = InfoPanelWidget(self.db)
         self.right_panel.location_clicked.connect(self._filter_by_location)
-        main_splitter.addWidget(self.right_panel)
+        self.main_splitter.addWidget(self.right_panel)
         
-        main_splitter.setSizes([250, 700, 300])
-        main_layout.addWidget(main_splitter)
+        self.main_splitter.setSizes([250, 700, 300])  # Размеры по умолчанию
+        main_layout.addWidget(self.main_splitter)
         
         self.status = QStatusBar(); self.setStatusBar(self.status)
         self._update_status()
@@ -115,7 +163,7 @@ class MainWindow(QMainWindow):
         elif filter_type == "low_stock": self.filter_low_btn.setChecked(True)
         elif filter_type == "out_of_stock": self.filter_out_btn.setChecked(True)
 
-        self._refresh_table()  # ✅ ИСПРАВЛЕНО: мгновенное обновление
+        self._refresh_table()
         self._update_status()
 
     def _on_all_filter(self):
