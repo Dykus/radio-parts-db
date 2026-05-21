@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 from core.database import Database
 from utils.importer import import_csv
 
-# Файл для сохранения настроек окна
 SETTINGS_FILE = "window_settings.json"
 
 class PartDialog(QDialog):
@@ -58,12 +57,13 @@ class PartDialog(QDialog):
         self.price_spin.setDecimals(2)
         self.price_spin.setPrefix("₽ ")
         
-        # === ТРЕХУРОВНЕВОЕ МЕСТО ХРАНЕНИЯ ===
+        # === ЧЕТЫРЕХУРОВНЕВОЕ МЕСТО ХРАНЕНИЯ ===
         location_widget = QWidget()
         location_layout = QHBoxLayout(location_widget)
         location_layout.setContentsMargins(0, 0, 0, 0)
         location_layout.setSpacing(5)
         
+        # Уровень 1: Место (Дом, Гараж...)
         self.location_place_combo = QComboBox()
         self.location_place_combo.setEditable(True)
         self.location_place_combo.setPlaceholderText("Место")
@@ -71,20 +71,30 @@ class PartDialog(QDialog):
         self.location_place_combo.addItems(["", "Дом", "Контора", "Гараж", "Склад"])
         self.location_place_combo.currentTextChanged.connect(self._update_location_containers)
         
+        # Уровень 2: Контейнер (Шкаф, Подвал...)
         self.location_container_combo = QComboBox()
         self.location_container_combo.setEditable(True)
         self.location_container_combo.setPlaceholderText("Контейнер")
         self.location_container_combo.setMinimumWidth(120)
-        self.location_container_combo.currentTextChanged.connect(self._update_location_cells)
+        self.location_container_combo.currentTextChanged.connect(self._update_location_shelves)
         
-        self.location_cell_combo = QComboBox()
-        self.location_cell_combo.setEditable(True)
-        self.location_cell_combo.setPlaceholderText("Ячейка")
-        self.location_cell_combo.setMinimumWidth(100)
+        # Уровень 3: Полка/Ящик
+        self.location_shelf_combo = QComboBox()
+        self.location_shelf_combo.setEditable(True)
+        self.location_shelf_combo.setPlaceholderText("Полка/Ящик")
+        self.location_shelf_combo.setMinimumWidth(100)
+        self.location_shelf_combo.currentTextChanged.connect(self._update_location_sections)
+        
+        # Уровень 4: Секция/Номер
+        self.location_section_combo = QComboBox()
+        self.location_section_combo.setEditable(True)
+        self.location_section_combo.setPlaceholderText("Секция/№")
+        self.location_section_combo.setMinimumWidth(80)
         
         location_layout.addWidget(self.location_place_combo)
         location_layout.addWidget(self.location_container_combo)
-        location_layout.addWidget(self.location_cell_combo)
+        location_layout.addWidget(self.location_shelf_combo)
+        location_layout.addWidget(self.location_section_combo)
         
         self.status_combo = QComboBox()
         self.status_combo.addItems(["new", "used", "suspect", "broken"])
@@ -143,8 +153,10 @@ class PartDialog(QDialog):
         if path: line_edit.setText(path)
     
     def _update_location_containers(self, place):
+        """Обновляет список контейнеров при смене места."""
         self.location_container_combo.clear()
-        self.location_cell_combo.clear()
+        self.location_shelf_combo.clear()
+        self.location_section_combo.clear()
         if not place: return
         
         if self.db:
@@ -158,21 +170,45 @@ class PartDialog(QDialog):
                         containers.add(p[1])
             self.location_container_combo.addItems([""] + sorted(containers))
     
-    def _update_location_cells(self, container):
-        self.location_cell_combo.clear()
+    def _update_location_shelves(self, container):
+        """Обновляет список полок/ящиков при смене контейнера."""
+        self.location_shelf_combo.clear()
+        self.location_section_combo.clear()
+        
         place = self.location_place_combo.currentText()
         if not place or not container: return
         
         if self.db:
-            cells = set()
+            shelves = set()
             parts = self.db.get_all_parts_filtered()
             for part in parts:
                 location = part.get('location', '')
                 if location:
                     p = [x.strip() for x in location.split('/')]
                     if len(p) >= 3 and p[0] == place and p[1] == container:
-                        cells.add(p[2])
-            self.location_cell_combo.addItems([""] + sorted(cells))
+                        shelves.add(p[2])
+            self.location_shelf_combo.addItems([""] + sorted(shelves))
+
+    def _update_location_sections(self, section):
+        """Обновляет список секций при смене полки."""
+        self.location_section_combo.clear()
+        
+        place = self.location_place_combo.currentText()
+        container = self.location_container_combo.currentText()
+        shelf = self.location_shelf_combo.currentText()
+        
+        if not all([place, container, shelf]): return
+        
+        if self.db:
+            sections = set()
+            parts = self.db.get_all_parts_filtered()
+            for part in parts:
+                location = part.get('location', '')
+                if location:
+                    p = [x.strip() for x in location.split('/')]
+                    if len(p) >= 4 and p[0] == place and p[1] == container and p[2] == shelf:
+                        sections.add(p[3])
+            self.location_section_combo.addItems([""] + sorted(sections))
     
     def _fill_form(self, data):
         self.name_edit.setText(data.get('name', ''))
@@ -183,17 +219,29 @@ class PartDialog(QDialog):
         self.quantity_spin.setValue(data.get('quantity', 0))
         self.price_spin.setValue(data.get('price', 0))
         
+        # Разбираем место хранения на 4 части
         location = data.get('location', '')
         if location:
             parts = [p.strip() for p in location.split('/')]
+            
+            # Уровень 1
             if len(parts) >= 1:
                 self.location_place_combo.setCurrentText(parts[0])
                 self._update_location_containers(parts[0])
+            
+            # Уровень 2
             if len(parts) >= 2:
                 self.location_container_combo.setCurrentText(parts[1])
-                self._update_location_cells(parts[0])
+                self._update_location_shelves(parts[1])
+            
+            # Уровень 3
             if len(parts) >= 3:
-                self.location_cell_combo.setCurrentText(parts[2])
+                self.location_shelf_combo.setCurrentText(parts[2])
+                self._update_location_sections(parts[2])
+            
+            # Уровень 4
+            if len(parts) >= 4:
+                self.location_section_combo.setCurrentText(parts[3])
         
         self.status_combo.setCurrentText(data.get('status', 'new'))
         self.image_path_edit.setText(data.get('image_path', ''))
@@ -212,10 +260,13 @@ class PartDialog(QDialog):
         self.accept()
     
     def get_location_string(self):
+        """Собирает полный путь из 4 полей."""
         place = self.location_place_combo.currentText().strip()
         container = self.location_container_combo.currentText().strip()
-        cell = self.location_cell_combo.currentText().strip()
-        parts = [p for p in [place, container, cell] if p]
+        shelf = self.location_shelf_combo.currentText().strip()
+        section = self.location_section_combo.currentText().strip()
+        
+        parts = [p for p in [place, container, shelf, section] if p]
         return ' / '.join(parts) if parts else ''
     
     def get_data(self):
@@ -282,12 +333,11 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
-        self.setWindowTitle("📦 RadioPartsDB v0.6.1")
+        self.setWindowTitle("📦 RadioPartsDB v0.7.0")
         self.setMinimumSize(1200, 700)
         self.current_filter = "all"
         self.selected_location_path = None
         
-        # Загрузка настроек окна
         self._load_window_settings()
         
         self._init_ui()
@@ -295,7 +345,6 @@ class MainWindow(QMainWindow):
         self._load_locations()
     
     def _load_window_settings(self):
-        """Загружает позицию и размер окна из файла."""
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, 'r') as f:
@@ -307,7 +356,6 @@ class MainWindow(QMainWindow):
                 logger.warning(f"Не удалось загрузить настройки окна: {e}")
 
     def _save_window_settings(self):
-        """Сохраняет позицию и размер окна в файл."""
         try:
             geom = self.geometry()
             settings = {
@@ -319,7 +367,6 @@ class MainWindow(QMainWindow):
             logger.warning(f"Не удалось сохранить настройки окна: {e}")
 
     def closeEvent(self, event):
-        """Вызывается при закрытии окна."""
         self._save_window_settings()
         super().closeEvent(event)
 
@@ -407,13 +454,12 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(5, 5, 5, 5)
         
         photo_label = QLabel("🖼️ Предпросмотр")
-        photo_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #555;") # ✅ Исправлен цвет текста
+        photo_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #555;")
         right_layout.addWidget(photo_label)
         
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setMinimumHeight(200)
-        # ✅ Исправлены цвета на нейтральные/системные
         self.image_label.setStyleSheet("""
             QLabel { 
                 background-color: #f0f0f0; 
@@ -431,16 +477,15 @@ class MainWindow(QMainWindow):
         
         self.info_label = QLabel("")
         self.info_label.setWordWrap(True)
-        self.info_label.setStyleSheet("color: #333; padding: 5px; font-size: 11px;") # ✅ Исправлен цвет текста
+        self.info_label.setStyleSheet("color: #333; padding: 5px; font-size: 11px;")
         right_layout.addWidget(self.info_label)
 
         location_label = QLabel("📍 Навигатор по местам")
-        location_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #555; margin-top: 10px;") # ✅ Исправлен цвет текста
+        location_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #555; margin-top: 10px;")
         right_layout.addWidget(location_label)
         
         self.location_tree = QTreeWidget()
         self.location_tree.setHeaderHidden(True)
-        # ✅ Исправлены стили дерева под светлую тему
         self.location_tree.setStyleSheet("""
             QTreeWidget { 
                 background-color: #ffffff; 
@@ -573,7 +618,6 @@ class MainWindow(QMainWindow):
             scaled_pixmap = pixmap.scaled(self.image_label.size() - QSize(20, 20), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.image_label.setPixmap(scaled_pixmap)
             self.image_label.setText("")
-            # ✅ Цвет фона картинки при загрузке остается нейтральным
             self.image_label.setStyleSheet("QLabel { background-color: #f0f0f0; border: 1px solid #ccc; border-radius: 3px; padding: 5px; }")
         else:
             self._clear_image_preview()
@@ -587,7 +631,6 @@ class MainWindow(QMainWindow):
     
     def _clear_image_preview(self):
         self.image_label.setText("📷")
-        # ✅ Возвращаем нейтральный стиль заглушки
         self.image_label.setStyleSheet("background-color: #f0f0f0; border: 1px solid #ccc; border-radius: 3px; color: #888;")
         self.image_label.setPixmap(QPixmap())
         self.info_label.setText("")
