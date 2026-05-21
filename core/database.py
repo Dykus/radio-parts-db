@@ -146,20 +146,21 @@ class Database:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_location ON parts(location)")
         cursor.execute("PRAGMA foreign_keys = ON")
 
-    # ==================== КАТЕГОРИИ (НОВЫЕ МЕТОДЫ) ====================
-    def get_category_part_count_recursive(self, cat_id: int) -> int:
+    # ==================== КАТЕГОРИИ ====================
+    def _get_all_descendant_ids(self, cat_id: int, cursor) -> List[int]:
+        """Рекурсивно получает ID всех дочерних категорий."""
         descendants = [cat_id]
-        queue = [cat_id]
+        cursor.execute("SELECT id FROM categories WHERE parent_id = ?", (cat_id,))
+        for child in cursor.fetchall():
+            descendants.extend(self._get_all_descendant_ids(child[0], cursor))
+        return descendants
+
+    def get_category_part_count_recursive(self, cat_id: int) -> int:
+        """Рекурсивно считает детали в категории и всех её подкатегориях."""
         with self.get_cursor() as cursor:
-            while queue:
-                current = queue.pop(0)
-                cursor.execute("SELECT id FROM categories WHERE parent_id = ?", (current,))
-                for child in cursor.fetchall():
-                    cid = child[0]
-                    descendants.append(cid)
-                    queue.append(cid)
-            placeholders = ','.join('?' for _ in descendants)
-            cursor.execute(f"SELECT COALESCE(SUM(quantity), 0) FROM parts WHERE category_id IN ({placeholders})", descendants)
+            descendant_ids = self._get_all_descendant_ids(cat_id, cursor)
+            placeholders = ','.join('?' for _ in descendant_ids)
+            cursor.execute(f"SELECT COALESCE(SUM(quantity), 0) FROM parts WHERE category_id IN ({placeholders})", descendant_ids)
             return cursor.fetchone()[0]
 
     def get_category_children_count(self, cat_id: int) -> int:
@@ -179,29 +180,41 @@ class Database:
         with self.get_cursor() as cursor:
             cursor.execute("UPDATE categories SET parent_id = ? WHERE id = ?", (new_parent_id, cat_id))
 
-    # ==================== СТАНДАРТНЫЕ МЕТОДЫ ====================
+    # ==================== ЧАСТИ (CRUD) ====================
+    def get_part(self, part_id: int) -> Optional[Dict[str, Any]]:
+        with self.get_cursor() as cursor:
+            cursor.execute("""
+                SELECT p.*, c.name as category
+                FROM parts p
+                LEFT JOIN categories c ON p.category_id = c.id
+                WHERE p.id = ?
+            """, (part_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
     def get_all_parts_filtered(self, category_id=None, filter_type="all", location_path=None) -> List[Dict[str, Any]]:
         with self.get_cursor() as cursor:
             query = "SELECT id, name, part_type, package, quantity, price, location, status FROM parts WHERE 1=1"
             params = []
+            
+            # ✅ РЕКУРСИВНАЯ ФИЛЬТРАЦИЯ: если выбрана категория, включаем все подкатегории
             if category_id is not None:
-                query += " AND category_id = ?"
-                params.append(category_id)
+                descendant_ids = self._get_all_descendant_ids(category_id, cursor)
+                placeholders = ','.join('?' for _ in descendant_ids)
+                query += f" AND category_id IN ({placeholders})"
+                params.extend(descendant_ids)
+            
             if filter_type == "in_stock": query += " AND quantity > 0"
             elif filter_type == "low_stock": query += " AND quantity > 0 AND quantity < 10"
             elif filter_type == "out_of_stock": query += " AND (quantity = 0 OR status = 'Неисправно')"
+            
             if location_path:
                 query += " AND location LIKE ?"
                 params.append(f"{location_path}%")
+            
             query += " ORDER BY name"
             cursor.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
-
-    def get_part(self, part_id: int) -> Optional[Dict[str, Any]]:
-        with self.get_cursor() as cursor:
-            cursor.execute("SELECT * FROM parts WHERE id = ?", (part_id,))
-            row = cursor.fetchone()
-            return dict(row) if row else None
 
     def get_categories(self) -> List[tuple]:
         with self.get_cursor() as cursor:
@@ -239,7 +252,18 @@ class Database:
 
     def update_part(self, part_id: int, data: Dict[str, Any]):
         with self.get_cursor() as cursor:
-            cursor.execute("""UPDATE parts SET name=?, part_type=?, package=?, manufacturer=?, part_number=?, quantity=?, price=?, location=?, status=?, image_path=?, datasheet_path=?, notes=?, revision_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""", (data['name'], data.get('part_type'), data.get('package'), data.get('manufacturer'), data.get('part_number'), data.get('quantity', 0), data.get('price', 0), data.get('location'), data.get('status', 'Новое'), data.get('image_path'), data.get('datasheet_path'), data.get('notes'), data.get('revision_date'), part_id))
+            cursor.execute("""
+                UPDATE parts SET name=?, category_id=?, part_type=?, package=?, manufacturer=?, part_number=?,
+                                 quantity=?, price=?, location=?, status=?, image_path=?, 
+                                 datasheet_path=?, notes=?, revision_date=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id=?
+            """, (
+                data['name'], data.get('category_id'), data.get('part_type'),
+                data.get('package'), data.get('manufacturer'), data.get('part_number'),
+                data.get('quantity', 0), data.get('price', 0), data.get('location'),
+                data.get('status', 'Новое'), data.get('image_path'),
+                data.get('datasheet_path'), data.get('notes'), data.get('revision_date'), part_id
+            ))
 
     def delete_part(self, part_id: int, reason: str = "deleted_by_user"):
         part = self.get_part(part_id)

@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QTreeView, QAbstractItemView,
     QPushButton, QInputDialog, QMessageBox, QMenu
 )
-from PySide6.QtCore import Qt, QSortFilterProxyModel, Signal
+from PySide6.QtCore import Qt, QSortFilterProxyModel, Signal, QModelIndex
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
 logger = logging.getLogger(__name__)
@@ -27,20 +27,20 @@ class CategoryTreeWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # 📂 Кнопка сброса "Все категории" - СНАЧАЛА!
+        # 📂 Кнопка сброса "Все категории"
         self.btn_show_all = QPushButton("📂 Все категории")
         self.btn_show_all.setCheckable(True)
         self.btn_show_all.setChecked(True)
         self.btn_show_all.clicked.connect(self._on_show_all_clicked)
         layout.addWidget(self.btn_show_all)
 
-        # 🔍 Поиск - ВТОРЫМ!
+        # 🔍 Поиск
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("🔍 Поиск категорий...")
         self.search_edit.textChanged.connect(self._on_search)
         layout.addWidget(self.search_edit)
 
-        # 🌳 Дерево - ПОСЛЕДНИМ (занимает всё пространство)
+        # 🌳 Дерево
         self.tree_view = QTreeView()
         self.tree_view.setHeaderHidden(True)
         self.tree_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -60,7 +60,7 @@ class CategoryTreeWidget(QWidget):
         self.proxy_model = QSortFilterProxyModel()
         self.proxy_model.setSourceModel(self.source_model)
         self.proxy_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
-        self.proxy_model.setRecursiveFilteringEnabled(True)
+        self.proxy_model.setRecursiveFilteringEnabled(False)  # ❌ Отключаем встроенную рекурсию
 
         self.tree_view.setModel(self.proxy_model)
         layout.addWidget(self.tree_view)
@@ -79,6 +79,8 @@ class CategoryTreeWidget(QWidget):
         menu = QMenu(self)
 
         if not index.isValid():
+            menu.addAction("➕ Добавить категорию").triggered.connect(self._add_root_category)
+            menu.addSeparator()
             menu.addAction("🔽 Развернуть всё").triggered.connect(self.tree_view.expandAll)
             menu.addAction("🔼 Свернуть всё").triggered.connect(self.tree_view.collapseAll)
             menu.exec(self.tree_view.viewport().mapToGlobal(pos))
@@ -88,28 +90,27 @@ class CategoryTreeWidget(QWidget):
         cat_id = self.source_model.data(source_index, Qt.UserRole)
         cat_name = self.source_model.data(source_index, Qt.DisplayRole)
 
-        # Убираем счётчик из названия для меню
         clean_name = re.sub(r'\s*\(\d+\)\s*$', '', cat_name)
 
-        act_rename = menu.addAction(f"✏️ Переименовать «{clean_name}»")
-        act_add_sub = menu.addAction("➕ Добавить подкатегорию")
+        menu.addAction("➕ Добавить подкатегорию").triggered.connect(lambda: self._add_subcategory(cat_id))
         menu.addSeparator()
-        act_delete = menu.addAction("🗑️ Удалить категорию")
+        menu.addAction(f"✏️ Переименовать «{clean_name}»").triggered.connect(lambda: self._rename_category(cat_id, clean_name))
+        menu.addSeparator()
+        menu.addAction("🗑️ Удалить категорию").triggered.connect(lambda: self._delete_category(cat_id, clean_name))
         menu.addSeparator()
         menu.addAction("🔽 Развернуть всё").triggered.connect(self.tree_view.expandAll)
         menu.addAction("🔼 Свернуть всё").triggered.connect(self.tree_view.collapseAll)
 
-        action = menu.exec(self.tree_view.viewport().mapToGlobal(pos))
+        menu.exec(self.tree_view.viewport().mapToGlobal(pos))
 
-        if action == act_rename:
-            self._rename_category(cat_id, clean_name)
-        elif action == act_add_sub:
-            self._add_subcategory(cat_id)
-        elif action == act_delete:
-            self._delete_category(cat_id, clean_name)
+    def _add_root_category(self):
+        """Добавляет корневую категорию (не вложенную)."""
+        new_name, ok = QInputDialog.getText(self, "Новая категория", "Название категории:")
+        if ok and new_name.strip():
+            self.db.create_category(new_name.strip(), None)
+            self.categories_changed.emit()
 
     def _rename_category(self, cat_id, old_name):
-        # Убираем счётчик из старого названия
         clean_name = re.sub(r'\s*\(\d+\)\s*$', '', old_name)
         new_name, ok = QInputDialog.getText(self, "Переименовать", "Новое название:", text=clean_name)
         if ok and new_name.strip():
@@ -170,13 +171,23 @@ class CategoryTreeWidget(QWidget):
             self._on_show_all_clicked()
 
     def _on_search(self, text):
-        self.proxy_model.setFilterFixedString(text)
-        if text:
-            self.tree_view.expandAll()
-            self.btn_show_all.setChecked(False)
-        else:
+        """Ручной поиск с разворачиванием родительских элементов."""
+        search_text = text.strip().lower()
+        
+        if not search_text:
+            # Если поиск пустой - сворачиваем всё
+            self.proxy_model.setFilterFixedString("")
             self.tree_view.collapseAll()
             self.tree_view.expandToDepth(1)
+            return
+        
+        # ✅ Включаем фильтр proxy модели
+        self.proxy_model.setFilterFixedString(text)
+        self.proxy_model.setRecursiveFilteringEnabled(True)
+        
+        # ✅ Разворачиваем ВСЁ дерево чтобы показать все элементы
+        self.tree_view.expandAll()
+        self.btn_show_all.setChecked(False)
 
     def _on_click(self, proxy_index):
         source_index = self.proxy_model.mapToSource(proxy_index)

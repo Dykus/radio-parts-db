@@ -4,10 +4,10 @@ import logging
 import json
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QPushButton, QLineEdit, QStatusBar, QLabel, QMessageBox, QFileDialog, QApplication
+    QPushButton, QLineEdit, QStatusBar, QLabel, QMessageBox, QFileDialog
 )
 from PySide6.QtCore import Qt, QRect
-from PySide6.QtGui import QStandardItemModel, QStandardItem
+from PySide6.QtGui import QStandardItemModel
 
 from ui.dialogs.part_dialog import PartDialog
 from ui.widgets.parts_table import PartsTableWidget
@@ -24,7 +24,7 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
-        self.setWindowTitle("📦 RadioPartsDB v0.12.0")
+        self.setWindowTitle("📦 RadioPartsDB v0.13.0")
         self.setMinimumSize(1200, 700)
         self.current_filter = "all"
         self.selected_location_path = None
@@ -33,79 +33,41 @@ class MainWindow(QMainWindow):
         self._load_window_settings()
         self._init_ui()
         self._refresh_all()
-        
-        # Применяем сохранённые настройки после создания UI
         self._apply_saved_settings()
     
     def _load_window_settings(self):
-        """Загружает настройки из JSON файла."""
         if os.path.exists(SETTINGS_FILE):
             try:
-                with open(SETTINGS_FILE, 'r') as f:
-                    self.saved_settings = json.load(f)
+                with open(SETTINGS_FILE, 'r') as f: self.saved_settings = json.load(f)
                 logger.info(f"✅ Загружены настройки из {SETTINGS_FILE}")
-            except Exception as e:
-                logger.warning(f"Ошибка загрузки настроек: {e}")
-                self.saved_settings = {}
-        else:
-            self.saved_settings = {}
+            except Exception as e: logger.warning(f"Ошибка загрузки настроек: {e}"); self.saved_settings = {}
+        else: self.saved_settings = {}
 
     def _save_window_settings(self):
-        """Сохраняет все настройки: окно, сплиттеры, колонки."""
         try:
             settings = {
-                # Позиция и размер окна
                 'geometry': [self.geometry().x(), self.geometry().y(), self.width(), self.height()],
-                
-                # Позиции разделителей (сплиттеров)
                 'main_splitter_sizes': self.main_splitter.sizes(),
-                
-                # Ширина колонок таблицы
-                'table_column_widths': [
-                    self.parts_table.table_view.horizontalHeader().sectionSize(i)
-                    for i in range(8)  # 8 видимых колонок
-                ]
+                'table_column_widths': [self.parts_table.table_view.horizontalHeader().sectionSize(i) for i in range(8)]
             }
-            
-            with open(SETTINGS_FILE, 'w') as f:
-                json.dump(settings, f, indent=2)
-            logger.info(f"💾 Настройки сохранены в {SETTINGS_FILE}")
-        except Exception as e:
-            logger.warning(f"Ошибка сохранения настроек: {e}")
+            with open(SETTINGS_FILE, 'w') as f: json.dump(settings, f, indent=2)
+        except Exception as e: logger.warning(f"Ошибка сохранения настроек: {e}")
 
     def _apply_saved_settings(self):
-        """Применяет сохранённые настройки к интерфейсу."""
-        if not self.saved_settings:
-            return
-        
-        # Применяем размеры сплиттера
+        if not self.saved_settings: return
         if 'main_splitter_sizes' in self.saved_settings:
             sizes = self.saved_settings['main_splitter_sizes']
-            # Проверяем, что размеры валидны
-            if len(sizes) == 3 and all(s > 0 for s in sizes):
-                self.main_splitter.setSizes(sizes)
-                logger.info("✅ Применены размеры панелей")
-        
-        # Применяем ширину колонок таблицы
+            if len(sizes) == 3 and all(s > 0 for s in sizes): self.main_splitter.setSizes(sizes)
         if 'table_column_widths' in self.saved_settings:
             widths = self.saved_settings['table_column_widths']
             header = self.parts_table.table_view.horizontalHeader()
             for i, width in enumerate(widths):
-                if width > 0:  # Только положительные значения
-                    header.resizeSection(i, width)
-            logger.info("✅ Применена ширина колонок")
+                if width > 0: header.resizeSection(i, width)
 
-    def closeEvent(self, event):
-        """Сохраняет настройки при закрытии программы."""
-        self._save_window_settings()
-        super().closeEvent(event)
+    def closeEvent(self, event): self._save_window_settings(); super().closeEvent(event)
 
     def _init_ui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
-        
-        # --- Toolbar ---
+        central = QWidget(); self.setCentralWidget(central); main_layout = QVBoxLayout(central)
         toolbar = QHBoxLayout()
         self.add_btn = QPushButton("➕ Добавить"); self.add_btn.clicked.connect(self._add_part)
         self.edit_btn = QPushButton("✏️ Редактировать"); self.edit_btn.clicked.connect(self._edit_part)
@@ -119,116 +81,66 @@ class MainWindow(QMainWindow):
         
         self.search_edit = QLineEdit(); self.search_edit.setPlaceholderText("🔍 Поиск..."); self.search_edit.textChanged.connect(self._filter_table)
         
-        for w in [self.add_btn, self.edit_btn, self.del_btn, self.import_btn, QLabel("|"), 
-                  self.filter_all_btn, self.filter_stock_btn, self.filter_low_btn, self.filter_out_btn]:
-            toolbar.addWidget(w)
-        toolbar.addStretch()
-        toolbar.addWidget(self.search_edit)
+        for w in [self.add_btn, self.edit_btn, self.del_btn, self.import_btn, QLabel("|"), self.filter_all_btn, self.filter_stock_btn, self.filter_low_btn, self.filter_out_btn]: toolbar.addWidget(w)
+        toolbar.addStretch(); toolbar.addWidget(self.search_edit)
         main_layout.addLayout(toolbar)
         
-        # --- Main Splitter ---
-        self.main_splitter = QSplitter(Qt.Horizontal)  # ✅ Сохраняем ссылку на сплиттер
-        
-        # 1. Левая панель: Категории
+        self.main_splitter = QSplitter(Qt.Horizontal)
         self.category_tree = CategoryTreeWidget(self.db)
-        self.category_tree.category_selected.connect(self._on_category_selected)
-        self.category_tree.categories_changed.connect(self._refresh_all)
+        self.category_tree.category_selected.connect(self._on_category_selected); self.category_tree.categories_changed.connect(self._refresh_all)
         self.main_splitter.addWidget(self.category_tree)
         
-        # 2. Центральная панель: Таблица
         self.parts_table = PartsTableWidget(self.db)
-        self.parts_table.selection_changed.connect(self._on_selection_changed)
-        self.parts_table.double_clicked.connect(self._edit_part_by_id)
+        self.parts_table.selection_changed.connect(self._on_selection_changed); self.parts_table.double_clicked.connect(self._edit_part_by_id)
         self.main_splitter.addWidget(self.parts_table)
         
-        # 3. Правая панель: Фото + Навигатор
         self.right_panel = InfoPanelWidget(self.db)
         self.right_panel.location_clicked.connect(self._filter_by_location)
         self.main_splitter.addWidget(self.right_panel)
         
-        self.main_splitter.setSizes([250, 700, 300])  # Размеры по умолчанию
-        main_layout.addWidget(self.main_splitter)
-        
-        self.status = QStatusBar(); self.setStatusBar(self.status)
-        self._update_status()
+        self.main_splitter.setSizes([250, 700, 300]); main_layout.addWidget(self.main_splitter)
+        self.status = QStatusBar(); self.setStatusBar(self.status); self._update_status()
 
     def _apply_filter(self, filter_type):
-        """Применяет фильтр наличия и СРАЗУ обновляет таблицу."""
         self.current_filter = filter_type
-        for btn in [self.filter_all_btn, self.filter_stock_btn, self.filter_low_btn, self.filter_out_btn]:
-            btn.setChecked(False)
-        
+        for btn in [self.filter_all_btn, self.filter_stock_btn, self.filter_low_btn, self.filter_out_btn]: btn.setChecked(False)
         if filter_type == "all": self.filter_all_btn.setChecked(True)
         elif filter_type == "in_stock": self.filter_stock_btn.setChecked(True)
         elif filter_type == "low_stock": self.filter_low_btn.setChecked(True)
         elif filter_type == "out_of_stock": self.filter_out_btn.setChecked(True)
+        self._refresh_table(); self._update_status()
 
-        self._refresh_table()
-        self._update_status()
-
-    def _on_all_filter(self):
-        """Кнопка 'Все' сбрасывает и категорию, и фильтр наличия."""
-        self.selected_category_id = None
-        self.category_tree._on_show_all_clicked()
-        self._apply_filter("all")
-
-    def _on_category_selected(self, cat_id):
-        self.selected_category_id = cat_id
-        self._refresh_table()
-        self._update_status()
-
+    def _on_all_filter(self): self.selected_category_id = None; self.category_tree._on_show_all_clicked(); self._apply_filter("all")
+    def _on_category_selected(self, cat_id): self.selected_category_id = cat_id; self._refresh_table(); self._update_status()
     def _on_selection_changed(self, part_id):
-        if not part_id:
-            self.right_panel.update_content(None)
-            return
+        if not part_id: self.right_panel.update_content(None); return
         part = self.db.get_part(part_id)
         if part: self.right_panel.update_content(part)
-
-    def _filter_by_location(self, location_path):
-        self.selected_location_path = location_path
-        self._refresh_table()
-        self._update_status()
+    def _filter_by_location(self, location_path): self.selected_location_path = location_path; self._refresh_table(); self._update_status()
 
     def _edit_part_by_id(self, part_id):
         part = self.db.get_part(part_id)
         if part:
             dialog = PartDialog(self, part_data=part, db=self.db)
             if dialog.exec():
+                # ✅ Диалог уже вернул готовый category_id, просто сохраняем
                 self.db.update_part(part_id, dialog.get_data())
                 self._refresh_all()
                 QMessageBox.information(self, "✅", "Обновлено!")
 
-    def _refresh_all(self):
-        """Обновляет ВСЕ компоненты: категории, места, таблицу."""
-        self.category_tree.load_categories()
-        self.right_panel.load_tree()
-        self._refresh_table()
-        self._update_status()
-
-    def _refresh_table(self):
-        self.parts_table.load_data(self.selected_category_id, self.current_filter, self.selected_location_path)
-
-    def _filter_table(self, text):
-        self.parts_table.proxy_model.set_search_text(text)
-
+    def _refresh_all(self): self.category_tree.load_categories(); self.right_panel.load_tree(); self._refresh_table(); self._update_status()
+    def _refresh_table(self): self.parts_table.load_data(self.selected_category_id, self.current_filter, self.selected_location_path)
+    def _filter_table(self, text): self.parts_table.proxy_model.set_search_text(text)
     def _update_status(self):
-        s = self.db.get_stats()
-        loc = self.selected_location_path or "Везде"
+        s = self.db.get_stats(); loc = self.selected_location_path or "Везде"
         cat_text = "Все" if self.selected_category_id is None else "Категория"
         self.status.showMessage(f"📦 {s['total_parts']} | 💰 {s['total_value']:.0f}₽ | 📍 {loc} | 🏷 {cat_text}")
 
     def _add_part(self):
         dialog = PartDialog(self, db=self.db)
         if dialog.exec():
-            d = dialog.get_data()
-            cat_name = d['category']
-            cid = None
-            if cat_name:
-                cats = self.db.get_categories()
-                cid = next((c[0] for c in cats if c[1] == cat_name), None)
-                if not cid: cid = self.db.create_category(cat_name)
-            d['category_id'] = cid
-            self.db.create_part(d)
+            # ✅ Диалог уже вернул готовый category_id
+            self.db.create_part(dialog.get_data())
             self._refresh_all()
             QMessageBox.information(self, "✅", "Добавлено!")
 
@@ -242,16 +154,12 @@ class MainWindow(QMainWindow):
         if not pid: return
         name = self.db.get_part(pid)['name']
         if QMessageBox.question(self, "❓", f"Удалить '{name}'?") == QMessageBox.Yes:
-            self.db.delete_part(pid)
-            self._refresh_all()
-            QMessageBox.information(self, "✅", "Удалено")
+            self.db.delete_part(pid); self._refresh_all(); QMessageBox.information(self, "✅", "Удалено")
 
     def _import_csv(self):
         f, _ = QFileDialog.getOpenFileName(self, "CSV", "", "CSV (*.csv)")
         if f:
             try:
-                imp, err = import_csv(self.db, f)
-                self._refresh_all()
+                imp, err = import_csv(self.db, f); self._refresh_all()
                 QMessageBox.information(self, "Импорт", f"Добавлено: {imp}, Ошибок: {err}")
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", str(e))
+            except Exception as e: QMessageBox.critical(self, "Ошибка", str(e))
