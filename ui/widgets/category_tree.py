@@ -27,7 +27,20 @@ class CategoryTreeWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # 🌳 Дерево
+        # 📂 Кнопка сброса "Все категории" - СНАЧАЛА!
+        self.btn_show_all = QPushButton("📂 Все категории")
+        self.btn_show_all.setCheckable(True)
+        self.btn_show_all.setChecked(True)
+        self.btn_show_all.clicked.connect(self._on_show_all_clicked)
+        layout.addWidget(self.btn_show_all)
+
+        # 🔍 Поиск - ВТОРЫМ!
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("🔍 Поиск категорий...")
+        self.search_edit.textChanged.connect(self._on_search)
+        layout.addWidget(self.search_edit)
+
+        # 🌳 Дерево - ПОСЛЕДНИМ (занимает всё пространство)
         self.tree_view = QTreeView()
         self.tree_view.setHeaderHidden(True)
         self.tree_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -51,19 +64,6 @@ class CategoryTreeWidget(QWidget):
 
         self.tree_view.setModel(self.proxy_model)
         layout.addWidget(self.tree_view)
-
-        # 🔍 Поиск (внизу)
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("🔍 Поиск категорий...")
-        self.search_edit.textChanged.connect(self._on_search)
-        layout.addWidget(self.search_edit)
-
-        # 📂 Кнопка сброса "Все категории"
-        self.btn_show_all = QPushButton("📂 Все категории")
-        self.btn_show_all.setCheckable(True)
-        self.btn_show_all.setChecked(True)
-        self.btn_show_all.clicked.connect(self._on_show_all_clicked)
-        layout.addWidget(self.btn_show_all)
 
         # Сигналы
         self.tree_view.clicked.connect(self._on_click)
