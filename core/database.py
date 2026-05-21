@@ -36,6 +36,7 @@ class Database:
             self._connection = sqlite3.connect(str(self.db_path), check_same_thread=False)
             self._connection.row_factory = sqlite3.Row
             self._connection.execute("PRAGMA journal_mode=WAL")
+            self._connection.execute("PRAGMA foreign_keys = ON")
         return self._connection
 
     def close(self):
@@ -145,27 +146,36 @@ class Database:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_location ON parts(location)")
         cursor.execute("PRAGMA foreign_keys = ON")
 
-    # ==================== НОВЫЕ МЕТОДЫ ДЛЯ КАТЕГОРИЙ ====================
+    # ==================== КАТЕГОРИИ (НОВЫЕ МЕТОДЫ) ====================
     def get_category_part_count_recursive(self, cat_id: int) -> int:
-        """Рекурсивно считает детали в категории и всех её подкатегориях."""
         descendants = [cat_id]
         queue = [cat_id]
         with self.get_cursor() as cursor:
             while queue:
                 current = queue.pop(0)
                 cursor.execute("SELECT id FROM categories WHERE parent_id = ?", (current,))
-                children = cursor.fetchall()
-                for child in children:
+                for child in cursor.fetchall():
                     cid = child[0]
                     descendants.append(cid)
                     queue.append(cid)
-            
             placeholders = ','.join('?' for _ in descendants)
             cursor.execute(f"SELECT COALESCE(SUM(quantity), 0) FROM parts WHERE category_id IN ({placeholders})", descendants)
             return cursor.fetchone()[0]
 
+    def get_category_children_count(self, cat_id: int) -> int:
+        with self.get_cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM categories WHERE parent_id = ?", (cat_id,))
+            return cursor.fetchone()[0]
+
+    def rename_category(self, cat_id: int, new_name: str):
+        with self.get_cursor() as cursor:
+            cursor.execute("UPDATE categories SET name = ? WHERE id = ?", (new_name, cat_id))
+
+    def delete_category(self, cat_id: int):
+        with self.get_cursor() as cursor:
+            cursor.execute("DELETE FROM categories WHERE id = ?", (cat_id,))
+
     def move_category(self, cat_id: int, new_parent_id: Optional[int]):
-        """Перемещает категорию под нового родителя."""
         with self.get_cursor() as cursor:
             cursor.execute("UPDATE categories SET parent_id = ? WHERE id = ?", (new_parent_id, cat_id))
 

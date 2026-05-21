@@ -2,7 +2,7 @@
 import os
 import logging
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QScrollArea, QTreeWidget, QTreeWidgetItem, QStyle
+    QWidget, QVBoxLayout, QLabel, QScrollArea, QTreeWidget, QTreeWidgetItem, QStyle, QMenu
 )
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QPixmap
@@ -17,6 +17,7 @@ class InfoPanelWidget(QWidget):
         super().__init__(parent)
         self.db = db
         self._init_ui()
+        self._setup_context_menu()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -30,7 +31,7 @@ class InfoPanelWidget(QWidget):
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setMinimumHeight(150)
-        self.image_label.setMaximumHeight(220)  # 🔒 Ограничиваем высоту, чтобы не вытеснять дерево
+        self.image_label.setMaximumHeight(220)
         self.image_label.setStyleSheet(
             "QLabel { background-color: palette(mid); border: 1px solid palette(dark); border-radius: 3px; color: palette(text); }"
         )
@@ -39,7 +40,7 @@ class InfoPanelWidget(QWidget):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(self.image_label)
-        scroll_area.setMaximumHeight(240)  # 🔒 Фиксируем максимум области скролла
+        scroll_area.setMaximumHeight(240)
         layout.addWidget(scroll_area)
 
         self.info_label = QLabel("")
@@ -54,7 +55,7 @@ class InfoPanelWidget(QWidget):
 
         self.location_tree = QTreeWidget()
         self.location_tree.setHeaderHidden(True)
-        self.location_tree.setMinimumHeight(150)  # 🔒 Гарантируем место для дерева
+        self.location_tree.setMinimumHeight(150)
         self.location_tree.setStyleSheet(
             "QTreeWidget { background-color: palette(base); border: 1px solid palette(mid); color: palette(text); }"
             "QTreeWidget::item:hover { background-color: palette(highlight); color: palette(highlighted-text); }"
@@ -63,8 +64,18 @@ class InfoPanelWidget(QWidget):
         self.location_tree.itemClicked.connect(self._on_tree_click)
         layout.addWidget(self.location_tree)
         
-        # Растягиваем дерево, чтобы оно занимало всё оставшееся место
         layout.setStretchFactor(self.location_tree, 10)
+
+    def _setup_context_menu(self):
+        """Контекстное меню для навигатора по местам."""
+        self.location_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.location_tree.customContextMenuRequested.connect(self._show_location_context_menu)
+
+    def _show_location_context_menu(self, pos):
+        menu = QMenu(self)
+        menu.addAction("🔽 Развернуть всё").triggered.connect(self.location_tree.expandAll)
+        menu.addAction("🔼 Свернуть всё").triggered.connect(self.location_tree.collapseAll)
+        menu.exec(self.location_tree.viewport().mapToGlobal(pos))
 
     def _on_tree_click(self, item, column):
         path_parts = []
