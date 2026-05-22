@@ -13,9 +13,10 @@ class InfoPanelWidget(QWidget):
     """Правая панель: Предпросмотр фото и Навигатор по местам."""
     location_clicked = Signal(str)
 
-    def __init__(self, db, parent=None):
+    def __init__(self, db, parent=None, start_depth=0):
         super().__init__(parent)
         self.db = db
+        self.start_depth = start_depth  # Запоминаем настройку глубины
         self._init_ui()
         self._setup_context_menu()
 
@@ -67,7 +68,6 @@ class InfoPanelWidget(QWidget):
         layout.setStretchFactor(self.location_tree, 10)
 
     def _setup_context_menu(self):
-        """Контекстное меню для навигатора по местам."""
         self.location_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.location_tree.customContextMenuRequested.connect(self._show_location_context_menu)
 
@@ -87,11 +87,8 @@ class InfoPanelWidget(QWidget):
             current = current.parent()
 
         full_path = " / ".join(reversed(path_parts))
-
-        if full_path.startswith("Все места / "):
-            full_path = full_path[len("Все места / "):]
-        elif full_path == "Все места":
-            full_path = None
+        if full_path.startswith("Все места / "): full_path = full_path[len("Все места / "):]
+        elif full_path == "Все места": full_path = None
 
         self.location_clicked.emit(full_path)
 
@@ -108,7 +105,12 @@ class InfoPanelWidget(QWidget):
         root = QTreeWidgetItem(self.location_tree, ["🏠 Все места"])
         root.setIcon(0, self.style().standardIcon(QStyle.SP_DriveHDIcon))
         build_tree(tree_data, root)
-        self.location_tree.expandAll()
+        
+        # ✅ ПРИМЕНЯЕМ НАСТРОЙКУ ГЛУБИНЫ
+        if self.start_depth == -1:
+            self.location_tree.expandAll()
+        else:
+            self.location_tree.expandToDepth(self.start_depth)
 
     def highlight_location(self, location_path):
         if not location_path or not location_path.strip():

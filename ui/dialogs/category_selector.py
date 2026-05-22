@@ -10,10 +10,11 @@ class CategorySelectorDialog(QDialog):
     """Диалог выбора категории с древовидным представлением."""
     category_selected = Signal(str)
 
-    def __init__(self, parent=None, db=None, selected_category=""):
+    def __init__(self, parent=None, db=None, selected_category="", start_depth=0):
         super().__init__(parent)
         self.db = db
         self.selected_category = selected_category
+        self.start_depth = start_depth  # Глубина раскрытия
         self.setWindowTitle("📂 Выбор категории")
         self.setMinimumSize(400, 500)
         self._init_ui()
@@ -94,11 +95,15 @@ class CategorySelectorDialog(QDialog):
                 item_map[parent_id].appendRow(item)
 
         self.tree_view.setModel(model)
-        self.tree_view.expandAll()
+        
+        # ✅ ПРИМЕНЯЕМ НАСТРОЙКУ ГЛУБИНЫ
+        if self.start_depth == -1:
+            self.tree_view.expandAll()
+        else:
+            self.tree_view.expandToDepth(self.start_depth)
 
         # Выделяем текущую категорию если есть
         if self.selected_category:
-            # Ищем по полному пути или имени
             matches = model.findItems(self.selected_category, Qt.MatchExactly | Qt.MatchRecursive)
             if matches:
                 self.tree_view.setCurrentIndex(matches[0].index())
@@ -108,7 +113,6 @@ class CategorySelectorDialog(QDialog):
         """Обрабатывает выбор категории."""
         index = self.tree_view.currentIndex()
         if index.isValid():
-            # ✅ Возвращаем полный путь вместо просто имени
             full_path = self._get_category_path(index)
             self.category_selected.emit(full_path)
             self.accept()
