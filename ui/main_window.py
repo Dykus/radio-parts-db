@@ -34,6 +34,7 @@ class MainWindow(QMainWindow):
         self._load_window_settings()
         self.category_tree_depth = self.saved_settings.get('category_tree_depth', 0)
         self.location_tree_depth = self.saved_settings.get('location_tree_depth', 0)
+        
         self._init_ui()
         self._refresh_all()
         self._apply_saved_settings()
