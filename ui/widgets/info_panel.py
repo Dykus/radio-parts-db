@@ -16,7 +16,7 @@ class InfoPanelWidget(QWidget):
     def __init__(self, db, parent=None, start_depth=0):
         super().__init__(parent)
         self.db = db
-        self.start_depth = start_depth  # Запоминаем настройку глубины
+        self.start_depth = start_depth
         self._init_ui()
         self._setup_context_menu()
 
@@ -24,7 +24,6 @@ class InfoPanelWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        # --- Секция фото ---
         photo_label = QLabel("🖼️ Предпросмотр")
         photo_label.setStyleSheet("font-size: 12px; font-weight: bold;")
         layout.addWidget(photo_label)
@@ -49,7 +48,6 @@ class InfoPanelWidget(QWidget):
         self.info_label.setStyleSheet("padding: 5px; font-size: 11px;")
         layout.addWidget(self.info_label)
 
-        # --- Секция навигатора ---
         location_label = QLabel("📍 Навигатор по местам")
         location_label.setStyleSheet("font-size: 12px; font-weight: bold; margin-top: 5px;")
         layout.addWidget(location_label)
@@ -106,7 +104,6 @@ class InfoPanelWidget(QWidget):
         root.setIcon(0, self.style().standardIcon(QStyle.SP_DriveHDIcon))
         build_tree(tree_data, root)
         
-        # ✅ ПРИМЕНЯЕМ НАСТРОЙКУ ГЛУБИНЫ
         if self.start_depth == -1:
             self.location_tree.expandAll()
         else:

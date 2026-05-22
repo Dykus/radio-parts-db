@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _init_ui(self):
+        # === Меню бар ===
         menubar = self.menuBar()
         settings_menu = menubar.addMenu("⚙️ Настройки")
         
@@ -92,6 +93,7 @@ class MainWindow(QMainWindow):
         action_open_settings.triggered.connect(self._open_settings)
         settings_menu.addAction(action_open_settings)
 
+        # === Основной UI ===
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)

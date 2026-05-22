@@ -1,18 +1,18 @@
 {
   "geometry": [
-    0,
-    23,
-    1418,
-    735
+    7,
+    30,
+    1200,
+    700
   ],
   "main_splitter_sizes": [
-    278,
-    779,
-    333
+    234,
+    716,
+    222
   ],
   "table_column_widths": [
     0,
-    100,
+    326,
     100,
     100,
     100,
@@ -20,6 +20,6 @@
     100,
     100
   ],
-  "category_tree_depth": 0,
-  "location_tree_depth": 2
+  "category_tree_depth": 1,
+  "location_tree_depth": 0
 }

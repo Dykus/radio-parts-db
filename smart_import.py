@@ -4,7 +4,6 @@ from pathlib import Path
 
 DB_PATH = Path("data/radioparts.db")
 
-# Структура категорий из ваших скриншотов
 CATEGORIES = {
     "Arduino": ["Модуль", "Плата"],
     "СИС": ["Направляющая", "Подшипник", "Ремень"],
@@ -35,7 +34,7 @@ SUBCATEGORIES = {
     "Микрофон": ["Электретный"],
     "Температуры": ["Термистор"],
     "Оперативная память": ["DDR1", "DDR2", "DDR3", "DDR4"],
-    "SMD": ["0805", "1206"],  # Для конденсаторов и резисторов
+    "SMD": ["0805", "1206"],
     "Керамический": ["NPO", "Высоковольтный"],
     "Дисковый": ["3мм", "5мм", "Квадратный"],
     "Пленочный": ["200V", "250V", "400V", "630V", "Высоковольтный"],
@@ -49,23 +48,20 @@ SUBCATEGORIES = {
     "Выводной": ["0.125 W", "0.25 W", "0.5 W", "1 W", "2 W", "5 W", "7 W"],
     "Зарубежный": ["MOSFET N - канал", "MOSFET P - канал", "NPN"],
     "Отечественный": ["MOSFET N - канал", "MOSFET P - канал", "NPN", "PNP"],
-    "NPN": ["Высокочастотный", "Мощный", "Обычный"],  # Для зарубежных
-    "PNP": ["Высокочастотный", "Обычный"],  # Для отечественных
-    "Высоковольтный": ["1.6kV", "3kV", "5kV", "6.3kV"],  # Для пленочных конденсаторов
-    "Мощный": ["1W", "3W"],  # Для светодиодов
+    "NPN": ["Высокочастотный", "Мощный", "Обычный"],
+    "PNP": ["Высокочастотный", "Обычный"],
+    "Высоковольтный": ["1.6kV", "3kV", "5kV", "6.3kV"],
+    "Мощный": ["1W", "3W"],
 }
 
 def get_or_create_category(cursor, name, parent_id=None):
-    """Получает ID категории или создаёт новую, если не существует."""
     if parent_id is None:
         cursor.execute("SELECT id FROM categories WHERE name = ? AND parent_id IS NULL", (name,))
     else:
         cursor.execute("SELECT id FROM categories WHERE name = ? AND parent_id = ?", (name, parent_id))
-    
     row = cursor.fetchone()
     if row:
         return row[0]
-    
     cursor.execute("INSERT INTO categories (name, parent_id) VALUES (?, ?)", (name, parent_id))
     return cursor.lastrowid
 
@@ -73,22 +69,16 @@ def import_categories():
     if not DB_PATH.exists():
         print(f"❌ База данных не найдена: {DB_PATH}")
         return
-    
     print(f"🔄 Импорт категорий в {DB_PATH}...")
-    
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
+
     try:
-        # Создаём корневые категории
         for root_name, children in CATEGORIES.items():
             root_id = get_or_create_category(cursor, root_name, None)
-            
-            # Создаём подкатегории первого уровня
             for child_name in children:
                 child_id = get_or_create_category(cursor, child_name, root_id)
-                
-                # Создаём подкатегории второго уровня (если есть в SUBCATEGORIES)
                 if child_name in SUBCATEGORIES:
                     for subchild_name in SUBCATEGORIES[child_name]:
                         get_or_create_category(cursor, subchild_name, child_id)
@@ -96,7 +86,6 @@ def import_categories():
         conn.commit()
         print("✅ Категории успешно импортированы!")
         
-        # Статистика
         cursor.execute("SELECT COUNT(*) FROM categories")
         total = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM categories WHERE parent_id IS NULL")

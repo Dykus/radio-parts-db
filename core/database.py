@@ -197,7 +197,6 @@ class Database:
             query = "SELECT id, name, part_type, package, quantity, price, location, status FROM parts WHERE 1=1"
             params = []
             
-            # ✅ РЕКУРСИВНАЯ ФИЛЬТРАЦИЯ: если выбрана категория, включаем все подкатегории
             if category_id is not None:
                 descendant_ids = self._get_all_descendant_ids(category_id, cursor)
                 placeholders = ','.join('?' for _ in descendant_ids)
@@ -240,7 +239,8 @@ class Database:
 
     def create_part(self, data: Dict[str, Any]) -> int:
         with self.get_cursor() as cursor:
-            cursor.execute("""INSERT INTO parts (name, category_id, part_type, package, manufacturer, part_number, quantity, price, location, status, image_path, datasheet_path, notes, revision_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (data['name'], data.get('category_id'), data.get('part_type'), data.get('package'), data.get('manufacturer'), data.get('part_number'), data.get('quantity', 0), data.get('price', 0), data.get('location'), data.get('status', 'Новое'), data.get('image_path'), data.get('datasheet_path'), data.get('notes'), data.get('revision_date')))
+            cursor.execute("""INSERT INTO parts (name, category_id, part_type, package, manufacturer, part_number, quantity, price, location, status, image_path, datasheet_path, notes, revision_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
+                (data['name'], data.get('category_id'), data.get('part_type'), data.get('package'), data.get('manufacturer'), data.get('part_number'), data.get('quantity', 0), data.get('price', 0), data.get('location'), data.get('status', 'Новое'), data.get('image_path'), data.get('datasheet_path'), data.get('notes'), data.get('revision_date')))
             return cursor.lastrowid
 
     def create_category(self, name: str, parent_id=None, description="") -> int:
@@ -251,7 +251,7 @@ class Database:
             return row[0] if row else None
 
     def update_part(self, part_id: int, data: Dict[str, Any]):
-        with self.get_cursor() as cursor:
+        with self.get_cursor() as cursor: 
             cursor.execute("""
                 UPDATE parts SET name=?, category_id=?, part_type=?, package=?, manufacturer=?, part_number=?,
                                  quantity=?, price=?, location=?, status=?, image_path=?, 

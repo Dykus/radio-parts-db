@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt, QCoreApplication
 
 sys.path.insert(0, str(Path(__file__).parent))
+
 from config import APP_NAME, APP_VERSION, DB_PATH, DATA_DIR
 from core.database import Database
 from ui.main_window import MainWindow
@@ -24,7 +25,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
-
+    
     db = Database(DB_PATH)
     db.init_schema()
 

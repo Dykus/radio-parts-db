@@ -13,7 +13,7 @@ def guess_encoding(file_path):
         try:
             with open(file_path, 'r', encoding=enc) as f:
                 f.read(1024)
-            return enc
+                return enc
         except UnicodeDecodeError:
             continue
     return 'utf-8'
@@ -34,11 +34,9 @@ def parse_date(date_str):
         return None
 
 def map_status(status_str):
-    """Сопоставляет русские/английские статусы с новыми русскими состояниями."""
     if not status_str:
         return 'Новое'
     s = status_str.strip().lower()
-    
     if s in ['новое', 'new', 'ок', 'исправное', 'отличное', 'excellent']:
         return 'Новое'
     if s in ['хорошее', 'good']:
@@ -56,7 +54,6 @@ def map_status(status_str):
 def import_csv(db: Database, file_path: str) -> tuple:
     encoding = guess_encoding(file_path)
     logger.info(f"Определена кодировка: {encoding}")
-
     imported_count = 0
     error_count = 0
     skipped_count = 0
@@ -142,7 +139,7 @@ def import_csv(db: Database, file_path: str) -> tuple:
                     part_data = {
                         'name': name,
                         'category': category,
-                        'part_type': p_type,
+                        'part_type': p_type, 
                         'package': package,
                         'manufacturer': manufacturer,
                         'quantity': quantity,
