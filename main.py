@@ -1,4 +1,6 @@
-# main.py
+# Copyright (c) 2026 Dykus
+# SPDX-License-Identifier: MIT
+
 import sys
 import logging
 from pathlib import Path

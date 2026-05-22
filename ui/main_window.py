@@ -11,9 +11,11 @@ from PySide6.QtGui import QStandardItemModel, QAction
 
 from ui.dialogs.part_dialog import PartDialog
 from ui.dialogs.settings_dialog import SettingsDialog
+from ui.dialogs.about_dialog import AboutDialog
 from ui.widgets.parts_table import PartsTableWidget
 from ui.widgets.info_panel import InfoPanelWidget
 from ui.widgets.category_tree import CategoryTreeWidget
+from config import APP_NAME, APP_VERSION
 
 logger = logging.getLogger(__name__)
 from core.database import Database
@@ -25,7 +27,7 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
-        self.setWindowTitle("📦 RadioPartsDB v0.16.0")
+        self.setWindowTitle(f"📦 {APP_NAME} v{APP_VERSION}")
         self.setMinimumSize(1200, 700)
         self.current_filter = "all"
         self.selected_location_path = None
@@ -87,11 +89,25 @@ class MainWindow(QMainWindow):
     def _init_ui(self):
         # === Меню бар ===
         menubar = self.menuBar()
-        settings_menu = menubar.addMenu("⚙️ Настройки")
+        main_menu = menubar.addMenu("Меню")
         
-        action_open_settings = QAction("Открыть настройки...", self)
-        action_open_settings.triggered.connect(self._open_settings)
-        settings_menu.addAction(action_open_settings)
+        action_settings = QAction("⚙️ Настройка программы", self)
+        action_settings.triggered.connect(self._open_settings)
+        main_menu.addAction(action_settings)
+        
+        action_help = QAction("❓ Помощь", self)
+        action_help.triggered.connect(self._open_help)
+        main_menu.addAction(action_help)
+        
+        action_about = QAction("ℹ️ О программе", self)
+        action_about.triggered.connect(self._show_about)
+        main_menu.addAction(action_about)
+        
+        main_menu.addSeparator()
+        
+        action_exit = QAction("🚪 Выход", self)
+        action_exit.triggered.connect(self.close)
+        main_menu.addAction(action_exit)
 
         # === Основной UI ===
         central = QWidget()
@@ -171,6 +187,15 @@ class MainWindow(QMainWindow):
             self.right_panel.load_tree()
             
             QMessageBox.information(self, "✅", "Настройки сохранены и применены!")
+
+    def _open_help(self):
+        from ui.dialogs.help_dialog import HelpDialog
+        dialog = HelpDialog(self)
+        dialog.exec()
+
+    def _show_about(self):
+        dialog = AboutDialog(self)
+        dialog.exec()
 
     def _apply_filter(self, filter_type):
         self.current_filter = filter_type
