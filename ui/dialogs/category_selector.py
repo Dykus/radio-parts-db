@@ -1,13 +1,13 @@
 # ui/dialogs/category_selector.py
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QTreeView, QDialogButtonBox
+    QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
+    QTreeView, QDialogButtonBox, QLabel, QComboBox
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
 class CategorySelectorDialog(QDialog):
-    """Диалог выбора категории с древовидным представлением."""
+    """Диалог выбора категории с древовидным представлением и настройкой глубины."""
     category_selected = Signal(str)
 
     def __init__(self, parent=None, db=None, selected_category="", start_depth=0):
@@ -16,12 +16,37 @@ class CategorySelectorDialog(QDialog):
         self.selected_category = selected_category
         self.start_depth = start_depth  # Глубина раскрытия
         self.setWindowTitle("📂 Выбор категории")
-        self.setMinimumSize(400, 500)
+        self.setMinimumSize(450, 550)
         self._init_ui()
         self._load_categories()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
+
+        # === INLINE НАСТРОЙКА ГЛУБИНЫ ===
+        depth_layout = QHBoxLayout()
+        depth_label = QLabel("📂 Глубина раскрытия:")
+        depth_label.setStyleSheet("font-weight: bold;")
+        depth_layout.addWidget(depth_label)
+        
+        self.depth_combo = QComboBox()
+        self.depth_combo.addItem("📁 Полностью свёрнуто", 0)
+        self.depth_combo.addItem("📂 Корни + 1 уровень", 1)
+        self.depth_combo.addItem("📂📂 Корни + 2 уровня", 2)
+        self.depth_combo.addItem("📂📂📂 Корни + 3 уровня", 3)
+        self.depth_combo.addItem("🗂 Развернуть всё", -1)
+        
+        # Устанавливаем текущее значение
+        current_index = self.depth_combo.findData(self.start_depth)
+        if current_index >= 0:
+            self.depth_combo.setCurrentIndex(current_index)
+        
+        # ✅ МГНОВЕННОЕ ПРИМЕНЕНИЕ
+        self.depth_combo.currentIndexChanged.connect(self._on_depth_changed)
+        depth_layout.addWidget(self.depth_combo)
+        depth_layout.addStretch()
+        
+        layout.addLayout(depth_layout)
 
         # Дерево категорий
         self.tree_view = QTreeView()
@@ -51,6 +76,14 @@ class CategorySelectorDialog(QDialog):
 
         # Сигнал двойного клика
         self.tree_view.doubleClicked.connect(self._on_select)
+
+    def _on_depth_changed(self, index):
+        """Мгновенное изменение глубины дерева."""
+        depth = self.depth_combo.currentData()
+        if depth == -1:
+            self.tree_view.expandAll()
+        else:
+            self.tree_view.expandToDepth(depth)
 
     def _get_category_path(self, index):
         """Строит полный путь категории через /"""

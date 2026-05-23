@@ -4,7 +4,7 @@ import logging
 import json
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QPushButton, QLineEdit, QStatusBar, QLabel, QMessageBox, QFileDialog, QMenuBar
+    QPushButton, QLineEdit, QStatusBar, QLabel, QMessageBox, QFileDialog, QMenuBar, QComboBox
 )
 from PySide6.QtCore import Qt, QRect
 from PySide6.QtGui import QStandardItemModel, QAction
@@ -36,6 +36,7 @@ class MainWindow(QMainWindow):
         self._load_window_settings()
         self.category_tree_depth = self.saved_settings.get('category_tree_depth', 0)
         self.location_tree_depth = self.saved_settings.get('location_tree_depth', 0)
+        self.selector_tree_depth = self.saved_settings.get('selector_tree_depth', 0)
         
         self._init_ui()
         self._refresh_all()
@@ -60,7 +61,8 @@ class MainWindow(QMainWindow):
                 'main_splitter_sizes': self.main_splitter.sizes(),
                 'table_column_widths': [self.parts_table.table_view.horizontalHeader().sectionSize(i) for i in range(8)],
                 'category_tree_depth': self.category_tree_depth,
-                'location_tree_depth': self.location_tree_depth
+                'location_tree_depth': self.location_tree_depth,
+                'selector_tree_depth': self.selector_tree_depth
             }
             with open(SETTINGS_FILE, 'w') as f: 
                 json.dump(settings, f, indent=2)
@@ -151,19 +153,63 @@ class MainWindow(QMainWindow):
         
         self.main_splitter = QSplitter(Qt.Horizontal)
         
+        # === ЛЕВАЯ ПАНЕЛЬ: Дерево категорий с inline-настройкой ===
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Inline ComboBox для глубины категорий
+        cat_depth_label = QLabel("📂 Глубина категорий:")
+        cat_depth_label.setStyleSheet("font-weight: bold; font-size: 10px;")
+        left_layout.addWidget(cat_depth_label)
+        
+        self.category_depth_inline = QComboBox()
+        self.category_depth_inline.addItem("📁 Полностью свёрнуто", 0)
+        self.category_depth_inline.addItem("📂 Корни + 1 уровень", 1)
+        self.category_depth_inline.addItem("📂📂 Корни + 2 уровня", 2)
+        self.category_depth_inline.addItem("📂📂📂 Корни + 3 уровня", 3)
+        self.category_depth_inline.addItem("🗂 Развернуть всё", -1)
+        self.category_depth_inline.setCurrentIndex(self.category_depth_inline.findData(self.category_tree_depth))
+        self.category_depth_inline.currentIndexChanged.connect(self._on_category_depth_changed)
+        left_layout.addWidget(self.category_depth_inline)
+        
         self.category_tree = CategoryTreeWidget(self.db, start_depth=self.category_tree_depth)
         self.category_tree.category_selected.connect(self._on_category_selected)
         self.category_tree.categories_changed.connect(self._refresh_all)
-        self.main_splitter.addWidget(self.category_tree)
+        left_layout.addWidget(self.category_tree)
+        
+        self.main_splitter.addWidget(left_panel)
         
         self.parts_table = PartsTableWidget(self.db)
         self.parts_table.selection_changed.connect(self._on_selection_changed)
         self.parts_table.double_clicked.connect(self._edit_part_by_id)
         self.main_splitter.addWidget(self.parts_table)
         
+        # === ПРАВАЯ ПАНЕЛЬ: Навигатор по местам с inline-настройкой ===
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Inline ComboBox для глубины мест
+        loc_depth_label = QLabel("📍 Глубина навигатора:")
+        loc_depth_label.setStyleSheet("font-weight: bold; font-size: 10px;")
+        right_layout.addWidget(loc_depth_label)
+        
+        self.location_depth_inline = QComboBox()
+        self.location_depth_inline.addItem("📁 Полностью свёрнуто", 0)
+        self.location_depth_inline.addItem("📂 Корни + 1 уровень", 1)
+        self.location_depth_inline.addItem("📂📂 Корни + 2 уровня", 2)
+        self.location_depth_inline.addItem("📂📂 Корни + 3 уровня", 3)
+        self.location_depth_inline.addItem("🗂 Развернуть всё", -1)
+        self.location_depth_inline.setCurrentIndex(self.location_depth_inline.findData(self.location_tree_depth))
+        self.location_depth_inline.currentIndexChanged.connect(self._on_location_depth_changed)
+        right_layout.addWidget(self.location_depth_inline)
+        
         self.right_panel = InfoPanelWidget(self.db, start_depth=self.location_tree_depth)
         self.right_panel.location_clicked.connect(self._filter_by_location)
-        self.main_splitter.addWidget(self.right_panel)
+        right_layout.addWidget(self.right_panel)
+        
+        self.main_splitter.addWidget(right_panel)
         
         self.main_splitter.setSizes([250, 700, 300])
         main_layout.addWidget(self.main_splitter)
@@ -172,21 +218,65 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
         self._update_status()
 
+    def _on_category_depth_changed(self, index):
+        """Мгновенное изменение глубины дерева категорий."""
+        depth = self.category_depth_inline.currentData()
+        self.category_tree_depth = depth
+        self.category_tree.start_depth = depth
+        self.category_tree.load_categories()
+        # Синхронизируем с настройками (если они открыты)
+        self.saved_settings['category_tree_depth'] = depth
+
+    def _on_location_depth_changed(self, index):
+        """Мгновенное изменение глубины навигатора по местам."""
+        depth = self.location_depth_inline.currentData()
+        self.location_tree_depth = depth
+        self.right_panel.start_depth = depth
+        self.right_panel.load_tree()
+        # Синхронизируем с настройками (если они открыты)
+        self.saved_settings['location_tree_depth'] = depth
+
     def _open_settings(self):
         dialog = SettingsDialog(self, settings=self.saved_settings)
+        
+        # ✅ СВЯЗЫВАЕМ СИГНАЛЫ НАСТРОЕК С ГЛАВНЫМ ОКНОМ
+        dialog.category_depth_changed.connect(self._on_category_depth_from_settings)
+        dialog.location_depth_changed.connect(self._on_location_depth_from_settings)
+        dialog.selector_depth_changed.connect(self._on_selector_depth_from_settings)
+        
         if dialog.exec():
             new_settings = dialog.get_settings()
             self.saved_settings.update(new_settings)
             self.category_tree_depth = new_settings.get('category_tree_depth', 0)
             self.location_tree_depth = new_settings.get('location_tree_depth', 0)
+            self.selector_tree_depth = new_settings.get('selector_tree_depth', 0)
             self._save_window_settings()
             
-            self.category_tree.start_depth = self.category_tree_depth
-            self.category_tree.load_categories()
-            self.right_panel.start_depth = self.location_tree_depth
-            self.right_panel.load_tree()
+            # Обновляем inline ComboBox
+            self.category_depth_inline.setCurrentIndex(
+                self.category_depth_inline.findData(self.category_tree_depth)
+            )
+            self.location_depth_inline.setCurrentIndex(
+                self.location_depth_inline.findData(self.location_tree_depth)
+            )
             
-            QMessageBox.information(self, "✅", "Настройки сохранены и применены!")
+            QMessageBox.information(self, "✅", "Настройки сохранены!")
+
+    def _on_category_depth_from_settings(self, depth):
+        """Применение глубины категорий из диалога настроек."""
+        self.category_tree_depth = depth
+        self.category_tree.start_depth = depth
+        self.category_tree.load_categories()
+
+    def _on_location_depth_from_settings(self, depth):
+        """Применение глубины мест из диалога настроек."""
+        self.location_tree_depth = depth
+        self.right_panel.start_depth = depth
+        self.right_panel.load_tree()
+
+    def _on_selector_depth_from_settings(self, depth):
+        """Применение глубины селектора из диалога настроек."""
+        self.selector_tree_depth = depth
 
     def _open_help(self):
         from ui.dialogs.help_dialog import HelpDialog
@@ -238,7 +328,8 @@ class MainWindow(QMainWindow):
     def _edit_part_by_id(self, part_id):
         part = self.db.get_part(part_id)
         if part:
-            dialog = PartDialog(self, part_data=part, db=self.db)
+            # ✅ ПЕРЕДАЕМ НАСТРОЙКУ ГЛУБИНЫ В ДИАЛОГ
+            dialog = PartDialog(self, part_data=part, db=self.db, start_depth=self.selector_tree_depth)
             if dialog.exec():
                 self.db.update_part(part_id, dialog.get_data())
                 self._refresh_all()
@@ -263,7 +354,8 @@ class MainWindow(QMainWindow):
         self.status.showMessage(f"📦 {s['total_parts']} | 💰 {s['total_value']:.0f}₽ | 📍 {loc} | 🏷 {cat_text}")
 
     def _add_part(self):
-        dialog = PartDialog(self, db=self.db)
+        # ✅ ПЕРЕДАЕМ НАСТРОЙКУ ГЛУБИНЫ В ДИАЛОГ
+        dialog = PartDialog(self, db=self.db, start_depth=self.selector_tree_depth)
         if dialog.exec():
             self.db.create_part(dialog.get_data())
             self._refresh_all()

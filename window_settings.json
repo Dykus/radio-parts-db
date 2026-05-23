@@ -20,6 +20,7 @@
     100,
     100
   ],
-  "category_tree_depth": 0,
-  "location_tree_depth": 0
+  "category_tree_depth": 2,
+  "location_tree_depth": 2,
+  "selector_tree_depth": 1
 }

@@ -11,10 +11,11 @@ from ui.dialogs.category_selector import CategorySelectorDialog
 logger = logging.getLogger(__name__)
 
 class PartDialog(QDialog):
-    def __init__(self, parent=None, part_data=None, db=None):
+    def __init__(self, parent=None, part_data=None, db=None, start_depth=0):
         super().__init__(parent)
         self.db = db
         self.part_data = part_data
+        self.start_depth = start_depth  # Глубина для диалога категорий
         self.setWindowTitle("✏️ Редактирование компонента")
         self.setMinimumWidth(550)
         self._init_ui()
@@ -157,7 +158,8 @@ class PartDialog(QDialog):
         layout.addRow(buttons)
     
     def _open_category_selector(self):
-        dialog = CategorySelectorDialog(self, db=self.db, selected_category=self.category_edit.text(), start_depth=2)
+        # Передаем настройки глубины (start_depth) в диалог выбора
+        dialog = CategorySelectorDialog(self, db=self.db, selected_category=self.category_edit.text(), start_depth=self.start_depth)
         dialog.category_selected.connect(self.category_edit.setText)
         dialog.exec()
     
