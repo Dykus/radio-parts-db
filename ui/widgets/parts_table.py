@@ -91,12 +91,33 @@ class PartsTableWidget(QWidget):
         self.table_view.setSortingEnabled(True)
         self.table_view.horizontalHeader().setSortIndicatorShown(True)
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        
+        # ✅ ВКЛЮЧАЕМ ПЕРЕТАСКИВАНИЕ КОЛОНОК
+        self.table_view.horizontalHeader().setSectionsMovable(True)
+        self.table_view.horizontalHeader().setDragEnabled(True)
+        self.table_view.setDragDropMode(QAbstractItemView.InternalMove)
+        
         self.table_view.hideColumn(0)
 
         self.table_view.selectionModel().selectionChanged.connect(self._on_selection)
         self.table_view.doubleClicked.connect(self._on_double_click)
 
         layout.addWidget(self.table_view)
+
+    def get_column_order(self):
+        """Возвращает логические индексы колонок в текущем визуальном порядке."""
+        header = self.table_view.horizontalHeader()
+        return [header.logicalIndex(i) for i in range(header.count())]
+
+    def set_column_order(self, order):
+        """Применяет сохраненный порядок колонок."""
+        if not order:
+            return
+        header = self.table_view.horizontalHeader()
+        for target_pos, logical_idx in enumerate(order):
+            current_pos = header.visualIndex(logical_idx)
+            if current_pos != -1 and current_pos != target_pos:
+                header.moveSection(current_pos, target_pos)
 
     def _on_selection(self, selected, deselected):
         indexes = self.table_view.selectionModel().selectedRows()
@@ -118,6 +139,7 @@ class PartsTableWidget(QWidget):
 
     def get_selected_part_id(self):
         indexes = self.table_view.selectionModel().selectedRows()
-        if not indexes: return None
+        if not indexes: 
+            return None
         row = indexes[0].row()
         return int(self.proxy_model.data(self.proxy_model.index(row, 0)))

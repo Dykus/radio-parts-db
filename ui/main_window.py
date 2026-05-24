@@ -60,6 +60,7 @@ class MainWindow(QMainWindow):
                 'geometry': [self.geometry().x(), self.geometry().y(), self.width(), self.height()],
                 'main_splitter_sizes': self.main_splitter.sizes(),
                 'table_column_widths': [self.parts_table.table_view.horizontalHeader().sectionSize(i) for i in range(8)],
+                'table_column_order': self.parts_table.get_column_order(),  # ✅ НОВОЕ: порядок колонок
                 'category_tree_depth': self.category_tree_depth,
                 'location_tree_depth': self.location_tree_depth,
                 'selector_tree_depth': self.selector_tree_depth
@@ -83,6 +84,10 @@ class MainWindow(QMainWindow):
             for i, width in enumerate(widths):
                 if width > 0: 
                     header.resizeSection(i, width)
+        
+        # ✅ ПРИМЕНЯЕМ ПОРЯДОК КОЛОНОК
+        if 'table_column_order' in self.saved_settings:
+            self.parts_table.set_column_order(self.saved_settings['table_column_order'])
 
     def closeEvent(self, event): 
         self._save_window_settings()
@@ -205,7 +210,6 @@ class MainWindow(QMainWindow):
         
         self.right_panel = InfoPanelWidget(self.db, start_depth=self.location_tree_depth)
         self.right_panel.location_clicked.connect(self._filter_by_location)
-        # ✅ СВЯЗЫВАЕМ СИГНАЛ ИЗ ИНЛАЙН-ПЕРЕКЛЮЧАТЕЛЯ НАВИГАТОРА
         self.right_panel.depth_changed.connect(self._on_location_depth_from_widget)
         right_layout.addWidget(self.right_panel)
         
@@ -227,16 +231,13 @@ class MainWindow(QMainWindow):
         self.saved_settings['category_tree_depth'] = depth
 
     def _on_location_depth_changed(self, index):
-        """Изменение глубины из верхнего инлайн-комбобокса"""
         depth = self.location_depth_inline.currentData()
         self.location_tree_depth = depth
         self.right_panel.start_depth = depth
         self.right_panel.load_tree()
-        # Убрали синхронизацию с несуществующим depth_combo внутри виджета
         self.saved_settings['location_tree_depth'] = depth
 
     def _on_location_depth_from_widget(self, depth):
-        """Принимает сигнал от кнопки внутри виджета и обновляет главное окно"""
         self.location_tree_depth = depth
         self.saved_settings['location_tree_depth'] = depth
         idx = self.location_depth_inline.findData(depth)
