@@ -54,10 +54,6 @@ target/
 .ipynb_checkpoints
 profile_default/
 ipython_config.py
-#Pipfile.lock
-#uv.lock
-#poetry.lock
-#pdm.lock
 .pdm.toml
 .pdm-python
 .pdm-build/
@@ -89,42 +85,32 @@ cython_debug/
 .cursorindexingignore
 
 # ========================================
-# RadioPartsDB - Пользовательские данные
+# RadioPartsDB - Локальные данные и настройки
 # ========================================
-# База данных SQLite (НЕ КОММИТИТЬ!)
+# База данных SQLite и временные файлы WAL/SHM
 data/*.db
 data/*.db-shm
 data/*.db-wal
 data/*.db-journal
 
-# Медиа-файлы пользователей
+# Медиа, логи и бэкапы
 data/images/*
 data/datasheets/*
-
-# Лог-файлы приложения
 data/*.log
-
-# Резервные копии БД
 data/backup_*.db
 
-# Оставляем пустую папку в репозитории
+# Настройки окна (у каждого пользователя свои)
+window_settings.json
+
+# Оставляем структуру папок в репозитории
 !data/.gitkeep
 
 # ========================================
-# IDE и редакторы
+# IDE и ОС
 # ========================================
 .vscode/
-.idea/
 *.swp
 *.swo
 *~
 .DS_Store
 Thumbs.db
-
-# Пользовательские данные
-data/*.db
-data/images/*
-data/datasheets/*
-data/*.log
-!data/.gitkeep
-window_settings.json
