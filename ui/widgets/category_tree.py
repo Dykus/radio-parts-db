@@ -72,7 +72,7 @@ class CategoryTreeWidget(QWidget):
         if not index.isValid():
             menu.addAction("➕ Добавить категорию").triggered.connect(self._add_root_category)
             menu.addSeparator()
-            menu.addAction("🔽 Развернуть всё").triggered.connect(self.tree_view.expandAll)
+            menu.addAction(" Развернуть всё").triggered.connect(self.tree_view.expandAll)
             menu.addAction("🔼 Свернуть всё").triggered.connect(self.tree_view.collapseAll)
             menu.exec(self.tree_view.viewport().mapToGlobal(pos))
             return
@@ -93,20 +93,20 @@ class CategoryTreeWidget(QWidget):
         menu.exec(self.tree_view.viewport().mapToGlobal(pos))
 
     def _add_root_category(self):
-        new_name, ok = QInputDialog.getText(self, "Новая категория", "Название категории:")
+        new_name, ok = QInputDialog.getText(self, "Новая категория", "Название категории: ")
         if ok and new_name.strip():
             self.db.create_category(new_name.strip(), None)
             self.categories_changed.emit()
 
     def _rename_category(self, cat_id, old_name):
         clean_name = re.sub(r'\s*\(\d+\)\s*$', '', old_name)
-        new_name, ok = QInputDialog.getText(self, "Переименовать", "Новое название:", text=clean_name)
+        new_name, ok = QInputDialog.getText(self, "Переименовать", "Новое название: ", text=clean_name)
         if ok and new_name.strip():
             self.db.rename_category(cat_id, new_name.strip())
             self.categories_changed.emit()
 
     def _add_subcategory(self, parent_id):
-        new_name, ok = QInputDialog.getText(self, "Новая подкатегория", "Название:")
+        new_name, ok = QInputDialog.getText(self, "Новая подкатегория", "Название: ")
         if ok and new_name.strip():
             self.db.create_category(new_name.strip(), parent_id)
             self.categories_changed.emit()
@@ -115,9 +115,9 @@ class CategoryTreeWidget(QWidget):
         children_count = self.db.get_category_children_count(cat_id)
         parts_count = self.db.get_category_part_count_recursive(cat_id)
         msg = f"Удалить категорию «{name}»?"
-        if children_count > 0: 
-            msg += f"\n⚠️ Внутри есть подкатегории ({children_count}). Они будут удалены."
-        if parts_count > 0: 
+        if children_count > 0:
+            msg += f"\n️ Внутри есть подкатегории ({children_count}). Они будут удалены."
+        if parts_count > 0:
             msg += f"\n⚠️ Внутри есть детали ({parts_count}). Они станут без категории."
         if QMessageBox.warning(self, "Подтверждение удаления", msg, QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
             self.db.delete_category(cat_id)
@@ -127,6 +127,27 @@ class CategoryTreeWidget(QWidget):
         self.tree_view.clearSelection()
         self.btn_show_all.setChecked(True)
         self.category_selected.emit(None)
+
+    def _apply_depth_recursive(self, max_depth, current_depth=0, parent_idx=None):
+        """Рекурсивно управляет раскрытием дерева вместо ненадёжного expandToDepth()"""
+        if max_depth == -1:
+            self.tree_view.expandAll()
+            return
+        
+        model = self.tree_view.model()
+        if parent_idx is None:
+            for row in range(model.rowCount()):
+                idx = model.index(row, 0)
+                self._apply_depth_recursive(max_depth, 0, idx)
+            return
+
+        if current_depth < max_depth:
+            self.tree_view.setExpanded(parent_idx, True)
+            for row in range(model.rowCount(parent_idx)):
+                child_idx = model.index(row, 0, parent_idx)
+                self._apply_depth_recursive(max_depth, current_depth + 1, child_idx)
+        else:
+            self.tree_view.setExpanded(parent_idx, False)
 
     def load_categories(self):
         self.source_model.clear()
@@ -152,13 +173,9 @@ class CategoryTreeWidget(QWidget):
             else:
                 item_map[parent_id].appendRow(item)
 
-        if self.start_depth == -1:
-            self.tree_view.expandAll()
-        elif self.start_depth == 0:
-            self.tree_view.collapseAll()
-        else:
-            self.tree_view.expandToDepth(self.start_depth)
-            
+        # ✅ ПРИМЕНЯЕМ НАШУ НАДЁЖНУЮ ФУНКЦИЮ ГЛУБИНЫ
+        self._apply_depth_recursive(self.start_depth)
+        
         if self.source_model.rowCount() == 0:
             self._on_show_all_clicked()
 
@@ -166,10 +183,7 @@ class CategoryTreeWidget(QWidget):
         search_text = text.strip().lower()
         if not search_text:
             self.proxy_model.setFilterFixedString("")
-            if self.start_depth == -1: 
-                self.tree_view.expandAll()
-            else: 
-                self.tree_view.expandToDepth(self.start_depth)
+            self._apply_depth_recursive(self.start_depth)
             return
         
         self.proxy_model.setFilterFixedString(text)

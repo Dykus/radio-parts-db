@@ -1,13 +1,13 @@
 # ui/dialogs/category_selector.py
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-    QTreeView, QDialogButtonBox, QLabel, QComboBox
+    QTreeView, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 
 class CategorySelectorDialog(QDialog):
-    """Диалог выбора категории с древовидным представлением и настройкой глубины."""
+    """Диалог выбора категории с древовидным представлением."""
     category_selected = Signal(str)
 
     def __init__(self, parent=None, db=None, selected_category="", start_depth=0):
@@ -15,38 +15,13 @@ class CategorySelectorDialog(QDialog):
         self.db = db
         self.selected_category = selected_category
         self.start_depth = start_depth  # Глубина раскрытия
-        self.setWindowTitle("📂 Выбор категории")
-        self.setMinimumSize(450, 550)
+        self.setWindowTitle(" Выбор категории")
+        self.setMinimumSize(400, 500)
         self._init_ui()
         self._load_categories()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-
-        # === INLINE НАСТРОЙКА ГЛУБИНЫ ===
-        depth_layout = QHBoxLayout()
-        depth_label = QLabel("📂 Глубина раскрытия:")
-        depth_label.setStyleSheet("font-weight: bold;")
-        depth_layout.addWidget(depth_label)
-        
-        self.depth_combo = QComboBox()
-        self.depth_combo.addItem("📁 Полностью свёрнуто", 0)
-        self.depth_combo.addItem("📂 Корни + 1 уровень", 1)
-        self.depth_combo.addItem("📂📂 Корни + 2 уровня", 2)
-        self.depth_combo.addItem("📂📂📂 Корни + 3 уровня", 3)
-        self.depth_combo.addItem("🗂 Развернуть всё", -1)
-        
-        # Устанавливаем текущее значение
-        current_index = self.depth_combo.findData(self.start_depth)
-        if current_index >= 0:
-            self.depth_combo.setCurrentIndex(current_index)
-        
-        # ✅ МГНОВЕННОЕ ПРИМЕНЕНИЕ
-        self.depth_combo.currentIndexChanged.connect(self._on_depth_changed)
-        depth_layout.addWidget(self.depth_combo)
-        depth_layout.addStretch()
-        
-        layout.addLayout(depth_layout)
 
         # Дерево категорий
         self.tree_view = QTreeView()
@@ -77,14 +52,6 @@ class CategorySelectorDialog(QDialog):
         # Сигнал двойного клика
         self.tree_view.doubleClicked.connect(self._on_select)
 
-    def _on_depth_changed(self, index):
-        """Мгновенное изменение глубины дерева."""
-        depth = self.depth_combo.currentData()
-        if depth == -1:
-            self.tree_view.expandAll()
-        else:
-            self.tree_view.expandToDepth(depth)
-
     def _get_category_path(self, index):
         """Строит полный путь категории через /"""
         path_parts = []
@@ -103,6 +70,27 @@ class CategorySelectorDialog(QDialog):
                 break
         
         return " / ".join(path_parts)
+
+    def _apply_depth_recursive(self, max_depth, current_depth=0, parent_idx=None):
+        """Рекурсивно управляет раскрытием дерева"""
+        if max_depth == -1:
+            self.tree_view.expandAll()
+            return
+        
+        model = self.tree_view.model()
+        if parent_idx is None:
+            for row in range(model.rowCount()):
+                idx = model.index(row, 0)
+                self._apply_depth_recursive(max_depth, 0, idx)
+            return
+
+        if current_depth < max_depth:
+            self.tree_view.setExpanded(parent_idx, True)
+            for row in range(model.rowCount(parent_idx)):
+                child_idx = model.index(row, 0, parent_idx)
+                self._apply_depth_recursive(max_depth, current_depth + 1, child_idx)
+        else:
+            self.tree_view.setExpanded(parent_idx, False)
 
     def _load_categories(self):
         """Загружает категории из БД и строит дерево."""
@@ -129,11 +117,8 @@ class CategorySelectorDialog(QDialog):
 
         self.tree_view.setModel(model)
         
-        # ✅ ПРИМЕНЯЕМ НАСТРОЙКУ ГЛУБИНЫ
-        if self.start_depth == -1:
-            self.tree_view.expandAll()
-        else:
-            self.tree_view.expandToDepth(self.start_depth)
+        # ✅ ПРИМЕНЯЕМ НАДЁЖНУЮ ФУНКЦИЮ ГЛУБИНЫ
+        self._apply_depth_recursive(self.start_depth)
 
         # Выделяем текущую категорию если есть
         if self.selected_category:

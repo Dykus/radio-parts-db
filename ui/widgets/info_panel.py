@@ -71,7 +71,7 @@ class InfoPanelWidget(QWidget):
 
     def _show_location_context_menu(self, pos):
         menu = QMenu(self)
-        menu.addAction("🔽 Развернуть всё").triggered.connect(self.location_tree.expandAll)
+        menu.addAction(" Развернуть всё").triggered.connect(self.location_tree.expandAll)
         menu.addAction("🔼 Свернуть всё").triggered.connect(self.location_tree.collapseAll)
         menu.exec(self.location_tree.viewport().mapToGlobal(pos))
 
@@ -90,6 +90,24 @@ class InfoPanelWidget(QWidget):
 
         self.location_clicked.emit(full_path)
 
+    def _apply_depth_tree_widget(self, max_depth, current_depth=0, item=None):
+        """Рекурсивно управляет раскрытием QTreeWidget"""
+        if max_depth == -1:
+            self.location_tree.expandAll()
+            return
+        
+        if item is None:
+            for i in range(self.location_tree.topLevelItemCount()):
+                self._apply_depth_tree_widget(max_depth, 0, self.location_tree.topLevelItem(i))
+            return
+
+        if current_depth < max_depth:
+            item.setExpanded(True)
+            for i in range(item.childCount()):
+                self._apply_depth_tree_widget(max_depth, current_depth + 1, item.child(i))
+        else:
+            item.setExpanded(False)
+
     def load_tree(self):
         self.location_tree.clear()
         tree_data = self.db.get_location_tree()
@@ -104,10 +122,8 @@ class InfoPanelWidget(QWidget):
         root.setIcon(0, self.style().standardIcon(QStyle.SP_DriveHDIcon))
         build_tree(tree_data, root)
         
-        if self.start_depth == -1:
-            self.location_tree.expandAll()
-        else:
-            self.location_tree.expandToDepth(self.start_depth)
+        # ✅ ПРИМЕНЯЕМ НАДЁЖНУЮ ФУНКЦИЮ ГЛУБИНЫ
+        self._apply_depth_tree_widget(self.start_depth)
 
     def highlight_location(self, location_path):
         if not location_path or not location_path.strip():
@@ -167,7 +183,7 @@ class InfoPanelWidget(QWidget):
             )
             self.image_label.setText("")
         else:
-            self.image_label.setText("📷")
+            self.image_label.setText("")
             self.image_label.setStyleSheet(
                 "QLabel { background-color: palette(mid); border: 1px solid palette(dark); border-radius: 3px; color: palette(text); }"
             )
