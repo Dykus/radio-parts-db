@@ -1,26 +1,26 @@
 @echo off
-echo [RadioPartsDB] Starting launcher...
+echo [RadioPartsDB] Starting...
 
-REM Check and activate virtual environment
-if exist venv\Scripts\activate.bat (
-    call venv\Scripts\activate.bat
-) else (
-    echo [Setup] Creating virtual environment...
-    python -m venv venv
-    call venv\Scripts\activate.bat
-    echo [Setup] Installing dependencies...
-    pip install fastapi uvicorn pydantic pyside6 >nul
+REM Check venv
+if not exist "venv\Scripts\python.exe" (
+    echo ERROR: venv not found
+    pause
+    exit /b
 )
 
-REM Start Backend API if it exists
-if exist backend\main.py (
-    echo [Backend] Starting API server...
-    start "RadioPartsDB-Backend" cmd /k python backend\main.py
-    timeout /t 2 >nul
+REM Start Backend in new window
+start "Backend" cmd /k "venv\Scripts\python.exe backend\main.py"
+
+REM Wait for server
+timeout /t 3 >nul
+
+REM Start Desktop
+start "Desktop" cmd /k "venv\Scripts\python.exe main.py"
+
+REM Open Web
+if exist "frontend\index.html" (
+    start "" "%CD%\frontend\index.html"
 )
 
-REM Start Desktop Application
-echo [Desktop] Launching application...
-python main.py
-
+echo All components launched.
 pause

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RadioPartsDB Web</title>
+    <!-- Подключаем Bootstrap для красивого дизайна -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .status-badge { font-weight: bold; }
+        .qty-high { background-color: #d1e7dd; color: #0f5132; }
+        .qty-low { background-color: #fff3cd; color: #664d03; }
+        .qty-out { background-color: #f8d7da; color: #842029; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark bg-dark mb-4">
+    <div class="container">
+        <span class="navbar-brand mb-0 h1"> RadioPartsDB <small class="text-white-50">Web Client</small></span>
+        <button class="btn btn-outline-light btn-sm" onclick="loadParts()">🔄 Обновить</button>
+    </div>
+</nav>
+
+<div class="container">
+    <!-- Статистика -->
+    <div class="row mb-3" id="stats-area">
+        <div class="col">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Загрузка статистики...</h5>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Таблица -->
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            Список деталей
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle" id="parts-table">
+                    <thead class="table-light">
+                        <tr>
+                            <th>ID</th>
+                            <th>Наименование</th>
+                            <th>Тип</th>
+                            <th>Корпус</th>
+                            <th class="text-center">Кол-во</th>
+                            <th class="text-end">Цена</th>
+                            <th>Место</th>
+                            <th>Статус</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <tr><td colspan="8" class="text-center py-4">⏳ Загрузка данных...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const API_URL = 'http://localhost:8000';
+
+    // Функция загрузки данных
+    async function loadParts() {
+        const tbody = document.getElementById('table-body');
+        const statsArea = document.getElementById('stats-area');
+        
+        try {
+            // 1. Загрузка таблицы
+            const response = await fetch(`${API_URL}/api/parts`);
+            if (!response.ok) throw new Error('Ошибка сети');
+            const parts = await response.json();
+
+            // Очистка таблицы
+            tbody.innerHTML = '';
+
+            if (parts.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4"> База пуста</td></tr>';
+                return;
+            }
+
+            // Генерация строк
+            parts.forEach(part => {
+                const row = document.createElement('tr');
+                
+                // Определение цвета строки по количеству
+                let rowClass = '';
+                if (part.quantity > 10) rowClass = 'qty-high';
+                else if (part.quantity > 0) rowClass = 'qty-low';
+                else rowClass = 'qty-out';
+
+                row.innerHTML = `
+                    <td class="text-muted small">${part.id}</td>
+                    <td><strong>${part.name}</strong></td>
+                    <td>${part.part_type || '-'}</td>
+                    <td>${part.package || '-'}</td>
+                    <td class="text-center fw-bold ${rowClass}">${part.quantity}</td>
+                    <td class="text-end">${part.price.toFixed(2)} ₽</td>
+                    <td>${part.location || '-'}</td>
+                    <td>${part.status || 'Новое'}</td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            // 2. Загрузка статистики
+            loadStats();
+
+        } catch (error) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-4">❌ Ошибка: ${error.message}<br><small>Убедитесь, что Backend запущен (порт 8000)</small></td></tr>`;
+        }
+    }
+
+    async function loadStats() {
+        try {
+            const res = await fetch(`${API_URL}/api/stats`);
+            const stats = await res.json();
+            document.getElementById('stats-area').innerHTML = `
+                <div class="col-md-4">
+                    <div class="card text-white bg-success">
+                        <div class="card-body">
+                            <h5 class="card-title">📦 Всего деталей</h5>
+                            <h2 class="card-text">${stats.total_parts}</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card text-white bg-info">
+                        <div class="card-body">
+                            <h5 class="card-title">💰 Общая стоимость</h5>
+                            <h2 class="card-text">${stats.total_value.toLocaleString()} ₽</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card text-white bg-warning">
+                        <div class="card-body">
+                            <h5 class="card-title">📍 Уникальных мест</h5>
+                            <h2 class="card-text">${stats.unique_locations || 0}</h2>
+                        </div>
+                    </div>
+                </div>
+            `;
+        } catch (e) {
+            console.error("Stats load error", e);
+        }
+    }
+
+    // Запуск при открытии страницы
+    loadParts();
+</script>
+
+</body>
+</html>

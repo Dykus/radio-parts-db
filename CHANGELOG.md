@@ -3,7 +3,22 @@
 Все значимые изменения в проекте `RadioPartsDB` будут документироваться в этом файле.
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 версионирование — на [Semantic Versioning](https://semver.org/lang/ru/).
+## [0.19.0] — 2026-05-24
 
+### 🌐 Добавлено
+- **Backend API**: Сервер на FastAPI с полным CRUD, Swagger UI (`/docs`) и CORS.
+- **Web Client**: Простой HTML/JS интерфейс, загружающий данные из API.
+- **Smart Launcher**: `run.bat` теперь запускает Backend, Desktop и Web одновременно.
+- **Pydantic V2 Fix**: Патч словарей БД перед сериализацией для предотвращения `ResponseValidationError`.
+
+### 🐛 Исправлено
+- Ошибка `PydanticDeprecatedSince20` (заменено `class Config` на `ConfigDict`).
+- Мгновенное закрытие `run.bat` из-за проблем с `activate.bat` и кодировкой.
+- Отсутствие полей `category_id`, `image_path` в ответах API вызывало краш валидации.
+
+### 🔧 Изменено
+- Ядро `core/database.py` полностью изолировано и переиспользуется в Desktop и API.
+- Архитектура переведена в режим `Backend + Frontend` с сохранением совместимости.
 
 ## [0.19.0] — 2026-05-24
 
