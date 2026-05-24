@@ -2,7 +2,8 @@
 import os
 import logging
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QScrollArea, QTreeWidget, QTreeWidgetItem, QStyle, QMenu
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QTreeWidget, QTreeWidgetItem, 
+    QStyle, QMenu, QPushButton
 )
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QPixmap
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 class InfoPanelWidget(QWidget):
     """Правая панель: Предпросмотр фото и Навигатор по местам."""
     location_clicked = Signal(str)
+    depth_changed = Signal(int)
 
     def __init__(self, db, parent=None, start_depth=0):
         super().__init__(parent)
@@ -24,7 +26,8 @@ class InfoPanelWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        photo_label = QLabel("🖼️ Предпросмотр")
+        # === ПРЕДПРОСМОТР ФОТО ===
+        photo_label = QLabel("️ Предпросмотр")
         photo_label.setStyleSheet("font-size: 12px; font-weight: bold;")
         layout.addWidget(photo_label)
 
@@ -48,10 +51,27 @@ class InfoPanelWidget(QWidget):
         self.info_label.setStyleSheet("padding: 5px; font-size: 11px;")
         layout.addWidget(self.info_label)
 
-        location_label = QLabel("📍 Навигатор по местам")
-        location_label.setStyleSheet("font-size: 12px; font-weight: bold; margin-top: 5px;")
-        layout.addWidget(location_label)
+        # === НАВИГАТОР ПО МЕСТАМ (с кнопкой быстрого переключения) ===
+        nav_header_layout = QHBoxLayout()
+        nav_header_layout.setContentsMargins(0, 5, 0, 5)
+        
+        location_label = QLabel(" Навигатор по местам")
+        location_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+        nav_header_layout.addWidget(location_label)
+        
+        nav_header_layout.addStretch()
+        
+        # Кнопка быстрого изменения глубины
+        self.btn_quick_depth = QPushButton("🔄 Глубина")
+        self.btn_quick_depth.setToolTip("Переключить уровень раскрытия: 0 -> 1 -> 2 -> 3 -> Всё")
+        self.btn_quick_depth.setFixedSize(65, 22)
+        self.btn_quick_depth.setStyleSheet("font-size: 9px;")
+        self.btn_quick_depth.clicked.connect(self._cycle_depth)
+        nav_header_layout.addWidget(self.btn_quick_depth)
+        
+        layout.addLayout(nav_header_layout)
 
+        # Дерево навигатора
         self.location_tree = QTreeWidget()
         self.location_tree.setHeaderHidden(True)
         self.location_tree.setMinimumHeight(150)
@@ -64,6 +84,16 @@ class InfoPanelWidget(QWidget):
         layout.addWidget(self.location_tree)
         
         layout.setStretchFactor(self.location_tree, 10)
+
+    def _cycle_depth(self):
+        """Циклически меняет глубину: 0 -> 1 -> 2 -> 3 -> -1 (всё) -> 0"""
+        levels = [0, 1, 2, 3, -1]
+        current = levels.index(self.start_depth) if self.start_depth in levels else 0
+        next_level = levels[(current + 1) % len(levels)]
+        
+        self.start_depth = next_level
+        self.depth_changed.emit(next_level)
+        self.load_tree()
 
     def _setup_context_menu(self):
         self.location_tree.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -91,7 +121,6 @@ class InfoPanelWidget(QWidget):
         self.location_clicked.emit(full_path)
 
     def _apply_depth_tree_widget(self, max_depth, current_depth=0, item=None):
-        """Рекурсивно управляет раскрытием QTreeWidget"""
         if max_depth == -1:
             self.location_tree.expandAll()
             return
@@ -122,7 +151,6 @@ class InfoPanelWidget(QWidget):
         root.setIcon(0, self.style().standardIcon(QStyle.SP_DriveHDIcon))
         build_tree(tree_data, root)
         
-        # ✅ ПРИМЕНЯЕМ НАДЁЖНУЮ ФУНКЦИЮ ГЛУБИНЫ
         self._apply_depth_tree_widget(self.start_depth)
 
     def highlight_location(self, location_path):
