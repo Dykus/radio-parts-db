@@ -14,10 +14,11 @@ from core.database import Database
 PROJECT_ROOT = Path(__file__).parent.parent
 DB_PATH = PROJECT_ROOT / "data" / "radioparts.db"
 
-# === Pydantic Models (Pydantic V2) ===
+# === Pydantic модели ===
 
 class PartResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+    
     id: int
     name: str
     part_type: Optional[str] = None
@@ -60,31 +61,18 @@ class PartUpdate(BaseModel):
     manufacturer: Optional[str] = None
     mpn: Optional[str] = None
 
-# === Helpers ===
-
-def _patch_db_dict(d: dict) -> dict:
-    """Pydantic V2 требует наличия всех ключей. Добавляем отсутствующие как None."""
-    required = ['category_id', 'image_path', 'description', 'manufacturer', 'mpn', 
-                'part_type', 'package', 'location', 'status']
-    for k in required:
-        if k not in d:
-            d[k] = None
-    if not d.get('status'):
-        d['status'] = "Новое"
-    return d
-
-# === App Init ===
+# === Инициализация ===
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if not DB_PATH.exists():
-        print(f"⚠️ DB not found: {DB_PATH}")
+        print(f"⚠️ База данных не найдена: {DB_PATH}")
     else:
         import sqlite3
         conn = sqlite3.connect(DB_PATH)
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.close()
-        print(f"✅ DB connected: {DB_PATH}")
+        print(f"✅ База данных подключена: {DB_PATH}")
     yield
 
 app = FastAPI(title="RadioPartsDB API", version="0.19.0", lifespan=lifespan)
@@ -102,6 +90,19 @@ def get_db():
     try: yield db
     finally: pass
 
+# === Helpers ===
+
+def _patch_db_dict(d: dict) -> dict:
+    """Добавляет отсутствующие ключи со значением None для совместимости с Pydantic V2"""
+    required = ['part_type', 'package', 'location', 'category_id', 'image_path', 
+                'description', 'manufacturer', 'mpn', 'status']
+    for key in required:
+        if key not in d:
+            d[key] = None
+    if not d.get('status'):
+        d['status'] = "Новое"
+    return d
+
 # === Endpoints ===
 
 @app.get("/")
@@ -112,14 +113,16 @@ def read_root():
 def get_parts(skip: int = 0, limit: int = 100, db: Database = Depends(get_db)):
     try:
         parts = db.get_all_parts_filtered(category_id=None, filter_type="all", location_path=None)
-        return [_patch_db_dict(p.copy()) for p in parts][skip:skip+limit]
+        # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: патчим словари перед валидацией
+        fixed = [_patch_db_dict(p.copy()) for p in parts]
+        return fixed[skip:skip+limit]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/parts/{part_id}", response_model=PartResponse)
 def get_part(part_id: int, db: Database = Depends(get_db)):
     part = db.get_part(part_id)
-    if not part: raise HTTPException(status_code=404, detail="Not found")
+    if not part: raise HTTPException(status_code=404, detail="Part not found")
     return _patch_db_dict(part.copy())
 
 @app.post("/api/parts", response_model=PartResponse)
@@ -133,7 +136,7 @@ def create_part(part: PartCreate, db: Database = Depends(get_db)):
 def update_part(part_id: int, part: PartUpdate, db: Database = Depends(get_db)):
     try:
         existing = db.get_part(part_id)
-        if not existing: raise HTTPException(status_code=404, detail="Not found")
+        if not existing: raise HTTPException(status_code=404, detail="Part not found")
         update_data = {k: v for k, v in part.model_dump().items() if v is not None}
         db.update_part(part_id, {**existing, **update_data})
         return _patch_db_dict(db.get_part(part_id).copy())
@@ -144,7 +147,7 @@ def update_part(part_id: int, part: PartUpdate, db: Database = Depends(get_db)):
 def delete_part(part_id: int, db: Database = Depends(get_db)):
     try:
         db.delete_part(part_id)
-        return {"message": "Deleted"}
+        return {"message": "Part deleted"}
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/categories")
