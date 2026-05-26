@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLineEdit, QStatusBar, QLabel, QMessageBox, QFileDialog, QMenuBar, QComboBox
 )
 from PySide6.QtCore import Qt, QRect
-from PySide6.QtGui import QStandardItemModel, QAction
+from PySide6.QtGui import QStandardItemModel, QAction, QShortcut, QKeySequence
 
 from ui.dialogs.part_dialog import PartDialog
 from ui.dialogs.settings_dialog import SettingsDialog
@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
                 'geometry': [self.geometry().x(), self.geometry().y(), self.width(), self.height()],
                 'main_splitter_sizes': self.main_splitter.sizes(),
                 'table_column_widths': [self.parts_table.table_view.horizontalHeader().sectionSize(i) for i in range(8)],
-                'table_column_order': self.parts_table.get_column_order(),  # ✅ НОВОЕ: порядок колонок
+                'table_column_order': self.parts_table.get_column_order(),
                 'category_tree_depth': self.category_tree_depth,
                 'location_tree_depth': self.location_tree_depth,
                 'selector_tree_depth': self.selector_tree_depth
@@ -84,8 +84,6 @@ class MainWindow(QMainWindow):
             for i, width in enumerate(widths):
                 if width > 0: 
                     header.resizeSection(i, width)
-        
-        # ✅ ПРИМЕНЯЕМ ПОРЯДОК КОЛОНОК
         if 'table_column_order' in self.saved_settings:
             self.parts_table.set_column_order(self.saved_settings['table_column_order'])
 
@@ -222,6 +220,13 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
         self._update_status()
 
+        # ========== ГОРЯЧИЕ КЛАВИШИ ==========
+        QShortcut(QKeySequence("Ctrl+N"), self).activated.connect(self._add_part)
+        QShortcut(QKeySequence("Ctrl+E"), self).activated.connect(self._edit_part)
+        QShortcut(QKeySequence("Del"), self).activated.connect(self._delete_part)
+        QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self._focus_search)
+        QShortcut(QKeySequence("F5"), self).activated.connect(self._refresh_all)
+
     # === ОБРАБОТЧИКИ ГЛУБИНЫ ===
     def _on_category_depth_changed(self, index):
         depth = self.category_depth_inline.currentData()
@@ -347,6 +352,11 @@ class MainWindow(QMainWindow):
 
     def _filter_table(self, text): 
         self.parts_table.proxy_model.set_search_text(text)
+
+    def _focus_search(self):
+        """Устанавливает курсор в поле поиска и выделяет текст (горячая клавиша Ctrl+F)"""
+        self.search_edit.setFocus()
+        self.search_edit.selectAll()
 
     def _update_status(self):
         s = self.db.get_stats()
