@@ -3,18 +3,18 @@ import os
 import urllib.request
 import ssl
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QPushButton,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QScrollArea, QFileDialog, QMessageBox, QWidget, QGridLayout,
-    QSizePolicy, QApplication
+    QSizePolicy
 )
-from PySide6.QtCore import Qt, QSize, QRect, QPoint, QEvent
-from PySide6.QtGui import QPixmap, QDesktopServices, QFont, QWheelEvent, QImageReader, QTransform
+from PySide6.QtCore import Qt, QEvent
+from PySide6.QtGui import QPixmap
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtGui import QTextDocument
 from .part_dialog import PartDialog
 
 class ImageZoomWindow(QDialog):
-    """Окно для увеличенного просмотра изображения с масштабированием и перетаскиванием."""
+    # ... (без изменений, оставляем как было)
     def __init__(self, pixmap, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Увеличенное изображение")
@@ -25,8 +25,6 @@ class ImageZoomWindow(QDialog):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-
-        # Область прокрутки для изображения
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setAlignment(Qt.AlignCenter)
@@ -36,7 +34,6 @@ class ImageZoomWindow(QDialog):
         self.scroll_area.setWidget(self.image_label)
         layout.addWidget(self.scroll_area)
 
-        # Панель кнопок
         btn_layout = QHBoxLayout()
         self.zoom_in_btn = QPushButton("➕ Увеличить")
         self.zoom_in_btn.clicked.connect(lambda: self._zoom(1.2))
@@ -54,8 +51,6 @@ class ImageZoomWindow(QDialog):
         layout.addLayout(btn_layout)
 
         self._update_pixmap()
-
-        # Разрешаем колесо мыши для масштабирования
         self.setMouseTracking(True)
         self.scroll_area.viewport().installEventFilter(self)
         self.image_label.installEventFilter(self)
@@ -97,7 +92,6 @@ class PartViewer(QDialog):
         super().__init__(parent)
         self.part_data = part_data
         self.db = db
-        self.part_id = part_data.get('id')
         self.setWindowTitle(f"Просмотр детали: {part_data.get('name', 'Без имени')}")
         self.setMinimumSize(800, 600)
         self.setWindowFlags(self.windowFlags() | Qt.Window)
@@ -119,7 +113,7 @@ class PartViewer(QDialog):
 
         content_splitter = QHBoxLayout()
 
-        # Левая часть: изображение
+        # Левая панель: изображение
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         self.image_label = QLabel()
@@ -140,7 +134,7 @@ class PartViewer(QDialog):
         left_layout.addLayout(img_btn_layout)
         left_layout.addStretch()
 
-        # Правая часть: свойства в двух колонках
+        # Правая панель: свойства в виде сетки
         right_widget = QWidget()
         self.properties_grid = QGridLayout(right_widget)
         self.properties_grid.setColumnStretch(1, 1)
@@ -156,13 +150,9 @@ class PartViewer(QDialog):
             ("Состояние", "status"), ("Производитель", "manufacturer"), ("Артикул (MPN)", "part_number"),
             ("Дата ревизии", "revision_date")
         ]
-        left_col = []
-        right_col = []
+        left_col, right_col = [], []
         for i, (label, key) in enumerate(properties):
-            if i % 2 == 0:
-                left_col.append((label, key))
-            else:
-                right_col.append((label, key))
+            (left_col if i % 2 == 0 else right_col).append((label, key))
         row = 0
         for label, key in left_col:
             lbl = QLabel(label + ":")
@@ -184,6 +174,7 @@ class PartViewer(QDialog):
             self.property_labels[key] = val
             row += 1
 
+        # Заметки
         notes_label = QLabel("Заметки:")
         notes_label.setStyleSheet("font-weight: bold;")
         self.properties_grid.addWidget(notes_label, self.properties_grid.rowCount(), 0, 1, 2)
@@ -192,6 +183,7 @@ class PartViewer(QDialog):
         self.notes_text.setMaximumHeight(100)
         self.properties_grid.addWidget(self.notes_text, self.properties_grid.rowCount()-1, 2, 1, 2)
 
+        # Даташит
         ds_label = QLabel("Даташит:")
         ds_label.setStyleSheet("font-weight: bold;")
         self.datasheet_link = QLabel()
@@ -204,6 +196,7 @@ class PartViewer(QDialog):
         content_splitter.addWidget(right_widget, 2)
         main_layout.addLayout(content_splitter)
 
+        # Нижние кнопки
         btn_layout = QHBoxLayout()
         btn_edit = QPushButton("✏️ Редактировать")
         btn_edit.clicked.connect(self._edit_part)
@@ -220,10 +213,6 @@ class PartViewer(QDialog):
         self.current_pixmap = None
 
     def _fill_data(self):
-        # Обновляем данные из БД, чтобы гарантировать актуальность
-        fresh_data = self.db.get_part(self.part_id)
-        if fresh_data:
-            self.part_data = fresh_data
         self.name_label.setText(self.part_data.get('name', ''))
         status = self.part_data.get('status', 'Новое')
         self.status_label.setText(status)
@@ -246,7 +235,6 @@ class PartViewer(QDialog):
         else:
             self._set_label("category_path", "—")
         self._set_label("part_type", self.part_data.get('part_type') or '—')
-        # Номинал (формируем красиво)
         val_num = self.part_data.get('value_numeric')
         val_unit = self.part_data.get('value_unit')
         if val_num is not None and val_unit:
@@ -256,11 +244,7 @@ class PartViewer(QDialog):
         elif val_num is not None:
             self._set_label("value_nice", str(val_num))
         else:
-            raw = self.part_data.get('value_raw')
-            if raw:
-                self._set_label("value_nice", raw)
-            else:
-                self._set_label("value_nice", "—")
+            self._set_label("value_nice", "—")
         self._set_label("package", self.part_data.get('package') or '—')
         self._set_label("diameter_mm", self._format_dim(self.part_data.get('diameter_mm'), "мм"))
         self._set_label("height_mm", self._format_dim(self.part_data.get('height_mm'), "мм"))
@@ -358,12 +342,16 @@ class PartViewer(QDialog):
     def _edit_part(self):
         editor = PartDialog(parent=self, part_data=self.part_data, db=self.db, start_depth=0)
         if editor.exec():
-            # После сохранения редактора обновляем данные из БД и перезаполняем окно
-            updated = self.db.get_part(self.part_id)
+            new_data = editor.get_data()
+            self.db.update_part(self.part_data['id'], new_data)
+            updated = self.db.get_part(self.part_data['id'])
             if updated:
                 self.part_data = updated
                 self._fill_data()
-                QMessageBox.information(self, "Успешно", "Данные обновлены.")
+            # Обновляем главное окно (если есть метод _refresh_all)
+            parent = self.parent()
+            if parent and hasattr(parent, '_refresh_all'):
+                parent._refresh_all()
 
     def _print_part(self):
         printer = QPrinter(QPrinter.HighResolution)
@@ -384,22 +372,22 @@ class PartViewer(QDialog):
         <h1>{self.part_data.get('name', '')}</h1>
         <p><strong>Статус:</strong> {self.part_data.get('status', '')}</p>
         <hr>
-        <table>
-            <tr><td><strong>ID</strong></td><td>{self.part_data.get('id', '')}</td></tr>
-            <tr><td><strong>Категория</strong></td><td>{self.property_labels.get('category_path', QLabel()).text()}</td></tr>
-            <tr><td><strong>Тип детали</strong></td><td>{self.part_data.get('part_type', '—')}</td></tr>
-            <tr><td><strong>Номинал</strong></td><td>{self.property_labels.get('value_nice', QLabel()).text()}</td></tr>
-            <tr><td><strong>Корпус</strong></td><td>{self.part_data.get('package', '—')}</td></tr>
-            <tr><td><strong>Диаметр</strong></td><td>{self._format_dim(self.part_data.get('diameter_mm'), 'мм')}</td></tr>
-            <tr><td><strong>Высота</strong></td><td>{self._format_dim(self.part_data.get('height_mm'), 'мм')}</td></tr>
-            <tr><td><strong>Шаг выводов</strong></td><td>{self._format_dim(self.part_data.get('lead_pitch_mm'), 'мм')}</td></tr>
-            <tr><td><strong>Толщина выводов</strong></td><td>{self._format_dim(self.part_data.get('lead_diameter_mm'), 'мм')}</td></tr>
-            <tr><td><strong>Количество</strong></td><td>{self.part_data.get('quantity', 0)}</td></tr>
-            <tr><td><strong>Цена</strong></td><td>{self.part_data.get('price', 0):.2f} ₽</td></tr>
-            <tr><td><strong>Место</strong></td><td>{self.part_data.get('location', '—')}</td></tr>
-            <tr><td><strong>Производитель</strong></td><td>{self.part_data.get('manufacturer', '—')}</td></tr>
-            <tr><td><strong>Артикул</strong></td><td>{self.part_data.get('part_number', '—')}</td></tr>
-            <tr><td><strong>Дата ревизии</strong></td><td>{self.part_data.get('revision_date', '—')}</td></tr>
+        <table border="0">
+        <tr><td><strong>ID</strong></td><td>{self.part_data.get('id', '')}</td></tr>
+        <tr><td><strong>Категория</strong></td><td>{self._get_category_path(self.part_data.get('category_id')) if self.part_data.get('category_id') else '—'}</td></tr>
+        <tr><td><strong>Тип детали</strong></td><td>{self.part_data.get('part_type', '—')}</td></tr>
+        <tr><td><strong>Номинал</strong></td><td>{self.property_labels.get('value_nice', QLabel()).text()}</td></tr>
+        <tr><td><strong>Корпус</strong></td><td>{self.part_data.get('package', '—')}</td></tr>
+        <tr><td><strong>Диаметр</strong></td><td>{self._format_dim(self.part_data.get('diameter_mm'), 'мм')}</td></tr>
+        <tr><td><strong>Высота</strong></td><td>{self._format_dim(self.part_data.get('height_mm'), 'мм')}</td></tr>
+        <tr><td><strong>Шаг выводов</strong></td><td>{self._format_dim(self.part_data.get('lead_pitch_mm'), 'мм')}</td></tr>
+        <tr><td><strong>Толщина выводов</strong></td><td>{self._format_dim(self.part_data.get('lead_diameter_mm'), 'мм')}</td></tr>
+        <tr><td><strong>Количество</strong></td><td>{self.part_data.get('quantity', 0)}</td></tr>
+        <tr><td><strong>Цена</strong></td><td>{self.part_data.get('price', 0):.2f} ₽</td></tr>
+        <tr><td><strong>Место</strong></td><td>{self.part_data.get('location', '—')}</td></tr>
+        <tr><td><strong>Производитель</strong></td><td>{self.part_data.get('manufacturer', '—')}</td></tr>
+        <tr><td><strong>Артикул</strong></td><td>{self.part_data.get('part_number', '—')}</td></tr>
+        <tr><td><strong>Дата ревизии</strong></td><td>{self.part_data.get('revision_date', '—')}</td></tr>
         </table>
         <p><strong>Заметки:</strong><br>{self.part_data.get('notes', '')}</p>
         </body>
