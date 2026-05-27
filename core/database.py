@@ -82,9 +82,7 @@ class Database:
             self._ensure_dictionaries()
 
     def _ensure_dictionaries(self):
-        """Заполняет словари начальными значениями для типов деталей и производителей, если они пусты."""
         with self.get_cursor() as cursor:
-            # Типы деталей
             cursor.execute("SELECT COUNT(*) FROM dictionaries WHERE type = 'part_type'")
             if cursor.fetchone()[0] == 0:
                 default_types = [
@@ -95,7 +93,6 @@ class Database:
                 ]
                 for t in default_types:
                     cursor.execute("INSERT OR IGNORE INTO dictionaries (type, value) VALUES (?, ?)", ('part_type', t))
-            # Производители
             cursor.execute("SELECT COUNT(*) FROM dictionaries WHERE type = 'manufacturer'")
             if cursor.fetchone()[0] == 0:
                 default_manufacturers = [
@@ -230,21 +227,17 @@ class Database:
                               diameter_mm, height_mm, lead_pitch_mm, lead_diameter_mm
                        FROM parts WHERE 1=1"""
             params = []
-            
             if category_id is not None:
                 descendant_ids = self._get_all_descendant_ids(category_id, cursor)
                 placeholders = ','.join('?' for _ in descendant_ids)
                 query += f" AND category_id IN ({placeholders})"
                 params.extend(descendant_ids)
-            
             if filter_type == "in_stock": query += " AND quantity > 0"
             elif filter_type == "low_stock": query += " AND quantity > 0 AND quantity < 10"
             elif filter_type == "out_of_stock": query += " AND (quantity = 0 OR status = 'Неисправно')"
-            
             if location_path:
                 query += " AND location LIKE ?"
                 params.append(f"{location_path}%")
-            
             query += " ORDER BY name"
             cursor.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
@@ -274,7 +267,6 @@ class Database:
             return {'total_parts': total_parts, 'total_quantity': total_quantity, 'total_value': round(total_value, 2), 'out_of_stock': out_of_stock, 'unique_locations': unique_locations}
 
     def add_dictionary_value(self, dict_type: str, value: str):
-        """Добавляет новое значение в словарь, если его ещё нет."""
         if not value:
             return
         with self.get_cursor() as cursor:

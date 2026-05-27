@@ -13,6 +13,7 @@ from ui.dialogs.part_dialog import PartDialog
 from ui.dialogs.batch_edit_dialog import BatchEditDialog
 from ui.dialogs.settings_dialog import SettingsDialog
 from ui.dialogs.about_dialog import AboutDialog
+from ui.dialogs.part_viewer import PartViewer
 from ui.widgets.parts_table import PartsTableWidget
 from ui.widgets.info_panel import InfoPanelWidget
 from ui.widgets.category_tree import CategoryTreeWidget
@@ -202,7 +203,7 @@ class MainWindow(QMainWindow):
         
         self.parts_table = PartsTableWidget(self.db)
         self.parts_table.selection_changed.connect(self._on_selection_changed)
-        self.parts_table.double_clicked.connect(self._edit_part_by_id)
+        self.parts_table.double_clicked.connect(self._view_part)          # двойной клик -> просмотр
         self.parts_table.selection_changed_batch.connect(self._on_batch_selection_changed)
         self.main_splitter.addWidget(self.parts_table)
         
@@ -236,13 +237,14 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
         self._update_status()
 
+        # Горячие клавиши
         QShortcut(QKeySequence("Ctrl+N"), self).activated.connect(self._add_part)
         QShortcut(QKeySequence("Ctrl+E"), self).activated.connect(self._edit_part)
         QShortcut(QKeySequence("Del"), self).activated.connect(self._delete_part)
         QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self._focus_search)
         QShortcut(QKeySequence("F5"), self).activated.connect(self._refresh_all)
 
-    # ---- Остальные методы (они уже были, я их копирую для полноты) ----
+    # ---- Обработчики глубины ----
     def _on_category_depth_changed(self, index):
         depth = self.category_depth_inline.currentData()
         self.category_tree_depth = depth
@@ -266,6 +268,7 @@ class MainWindow(QMainWindow):
         if idx >= 0: self.location_depth_inline.setCurrentIndex(idx)
         self._save_window_settings()
 
+    # ---- Настройки, помощь, о программе ----
     def _open_settings(self):
         dialog = SettingsDialog(self, settings=self.saved_settings)
         dialog.category_depth_changed.connect(self._on_category_depth_from_settings)
@@ -304,6 +307,7 @@ class MainWindow(QMainWindow):
         dialog = AboutDialog(self)
         dialog.exec()
 
+    # ---- Фильтры и обновления ----
     def _apply_filter(self, filter_type):
         self.current_filter = filter_type
         for btn in [self.filter_all_btn, self.filter_stock_btn, self.filter_low_btn, self.filter_out_btn]: 
@@ -338,15 +342,6 @@ class MainWindow(QMainWindow):
         self._refresh_table()
         self._update_status()
 
-    def _edit_part_by_id(self, part_id):
-        part = self.db.get_part(part_id)
-        if part:
-            dialog = PartDialog(self, part_data=part, db=self.db, start_depth=self.selector_tree_depth)
-            if dialog.exec():
-                self.db.update_part(part_id, dialog.get_data())
-                self._refresh_all()
-                QMessageBox.information(self, "✅", "Обновлено!")
-
     def _refresh_all(self): 
         self.category_tree.load_categories()
         self.right_panel.load_tree()
@@ -369,6 +364,7 @@ class MainWindow(QMainWindow):
         cat_text = "Все" if self.selected_category_id is None else "Категория"
         self.status.showMessage(f"📦 {s['total_parts']} | 💰 {s['total_value']:.0f}₽ | 📍 {loc} | 🏷 {cat_text}")
 
+    # ---- Добавление, редактирование, удаление, импорт ----
     def _add_part(self):
         dialog = PartDialog(self, db=self.db, start_depth=self.selector_tree_depth)
         if dialog.exec():
@@ -378,10 +374,23 @@ class MainWindow(QMainWindow):
 
     def _edit_part(self):
         pid = self.parts_table.get_selected_part_id()
-        if pid: 
-            self._edit_part_by_id(pid)
-        else: 
+        if pid:
+            part = self.db.get_part(pid)
+            if part:
+                dialog = PartDialog(self, part_data=part, db=self.db, start_depth=self.selector_tree_depth)
+                if dialog.exec():
+                    self.db.update_part(pid, dialog.get_data())
+                    self._refresh_all()
+                    QMessageBox.information(self, "✅", "Обновлено!")
+        else:
             QMessageBox.warning(self, "⚠️", "Выберите строку")
+
+    def _view_part(self, part_id):
+        """Открывает окно просмотра детали (только чтение)"""
+        part = self.db.get_part(part_id)
+        if part:
+            viewer = PartViewer(part, self.db, self)
+            viewer.show()   # немодальное окно
 
     def _delete_part(self):
         pid = self.parts_table.get_selected_part_id()
@@ -403,6 +412,7 @@ class MainWindow(QMainWindow):
             except Exception as e: 
                 QMessageBox.critical(self, "Ошибка", str(e))
 
+    # ---- Пакетное редактирование ----
     def _on_batch_selection_changed(self, count):
         self.batch_edit_btn.setEnabled(count >= 2)
 

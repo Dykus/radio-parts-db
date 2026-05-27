@@ -5,6 +5,7 @@ from .settings_dialog import SettingsDialog
 from .about_dialog import AboutDialog
 from .help_dialog import HelpDialog
 from .batch_edit_dialog import BatchEditDialog
+from .part_viewer import PartViewer
 
 __all__ = [
     'PartDialog',
@@ -13,4 +14,5 @@ __all__ = [
     'AboutDialog',
     'HelpDialog',
     'BatchEditDialog'
+    'PartViewer'
 ]
