@@ -14,13 +14,11 @@ class PartsTableModel(QStandardItemModel):
         self.load_data()
 
     def _format_package_with_dimensions(self, package, dims):
-        """Формирует строку для колонки «Корпус»: package + размеры (если есть)"""
         if not dims:
             return package or ''
         parts = []
         if package:
             parts.append(package)
-        # Безопасно получаем значения, заменяя None на 0
         diam = dims.get('diameter_mm') or 0
         height = dims.get('height_mm') or 0
         pitch = dims.get('lead_pitch_mm') or 0

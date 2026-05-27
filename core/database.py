@@ -58,6 +58,7 @@ class Database:
 
             if current_version >= CURRENT_SCHEMA_VERSION:
                 logger.info(f"✅ Схема БД актуальна (версия {current_version})")
+                self._ensure_dictionaries()
                 return
 
             logger.info(f"🔄 Обновление схемы БД: {current_version} -> {CURRENT_SCHEMA_VERSION}")
@@ -78,6 +79,34 @@ class Database:
                     logger.critical(f"💥 Ошибка миграции v{version}: {e}")
                     raise RuntimeError(f"Миграция v{version} провалилась.") from e
             logger.info(f"🎉 Схема БД успешно обновлена до версии {CURRENT_SCHEMA_VERSION}")
+            self._ensure_dictionaries()
+
+    def _ensure_dictionaries(self):
+        """Заполняет словари начальными значениями для типов деталей и производителей, если они пусты."""
+        with self.get_cursor() as cursor:
+            # Типы деталей
+            cursor.execute("SELECT COUNT(*) FROM dictionaries WHERE type = 'part_type'")
+            if cursor.fetchone()[0] == 0:
+                default_types = [
+                    'Резистор', 'Конденсатор', 'Транзистор', 'Диод', 'Микросхема',
+                    'Тиристор', 'Симистор', 'Трансформатор', 'Индуктивность',
+                    'Реле', 'Предохранитель', 'Разъем', 'Кнопка', 'Светодиод',
+                    'Оптопара', 'Кварцевый резонатор', 'Батарейка', 'Модуль', 'Плата'
+                ]
+                for t in default_types:
+                    cursor.execute("INSERT OR IGNORE INTO dictionaries (type, value) VALUES (?, ?)", ('part_type', t))
+            # Производители
+            cursor.execute("SELECT COUNT(*) FROM dictionaries WHERE type = 'manufacturer'")
+            if cursor.fetchone()[0] == 0:
+                default_manufacturers = [
+                    'Texas Instruments', 'Analog Devices', 'STMicroelectronics', 'NXP',
+                    'Infineon', 'ON Semiconductor', 'Microchip', 'Maxim Integrated',
+                    'Fairchild', 'Panasonic', 'Murata', 'TDK', 'Samsung', 'Vishay',
+                    'Бортовой (Отечественный)', 'Неизвестен'
+                ]
+                for m in default_manufacturers:
+                    cursor.execute("INSERT OR IGNORE INTO dictionaries (type, value) VALUES (?, ?)", ('manufacturer', m))
+            logger.info("✅ Словари part_type и manufacturer заполнены значениями по умолчанию")
 
     def _migration_v1_initial(self, cursor):
         cursor.execute("""CREATE TABLE parts (
@@ -144,7 +173,6 @@ class Database:
         logger.info("✅ Добавлены поля value_numeric, value_unit, value_raw")
 
     def _migration_v4_add_capacitor_dimensions(self, cursor):
-        """Добавляем поля для габаритов конденсаторов"""
         cursor.execute("ALTER TABLE parts ADD COLUMN diameter_mm REAL")
         cursor.execute("ALTER TABLE parts ADD COLUMN height_mm REAL")
         cursor.execute("ALTER TABLE parts ADD COLUMN lead_pitch_mm REAL")
@@ -245,7 +273,19 @@ class Database:
             unique_locations = cursor.fetchone()[0] or 0
             return {'total_parts': total_parts, 'total_quantity': total_quantity, 'total_value': round(total_value, 2), 'out_of_stock': out_of_stock, 'unique_locations': unique_locations}
 
+    def add_dictionary_value(self, dict_type: str, value: str):
+        """Добавляет новое значение в словарь, если его ещё нет."""
+        if not value:
+            return
+        with self.get_cursor() as cursor:
+            cursor.execute("INSERT OR IGNORE INTO dictionaries (type, value) VALUES (?, ?)", (dict_type, value))
+
     def create_part(self, data: Dict[str, Any]) -> int:
+        # Сохраняем новые значения в словари
+        if data.get('part_type'):
+            self.add_dictionary_value('part_type', data['part_type'])
+        if data.get('manufacturer'):
+            self.add_dictionary_value('manufacturer', data['manufacturer'])
         with self.get_cursor() as cursor:
             cursor.execute("""INSERT INTO parts (
                 name, category_id, part_type, package, manufacturer, part_number,
@@ -270,6 +310,11 @@ class Database:
             return row[0] if row else None
 
     def update_part(self, part_id: int, data: Dict[str, Any]):
+        # Сохраняем новые значения в словари
+        if data.get('part_type'):
+            self.add_dictionary_value('part_type', data['part_type'])
+        if data.get('manufacturer'):
+            self.add_dictionary_value('manufacturer', data['manufacturer'])
         with self.get_cursor() as cursor: 
             cursor.execute("""
                 UPDATE parts SET

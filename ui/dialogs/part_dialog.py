@@ -51,6 +51,7 @@ class PartDialog(QDialog):
         # --- Тип детали (выпадающий список с редактированием) ---
         self.part_type_combo = QComboBox()
         self.part_type_combo.setEditable(True)
+        self.part_type_combo.setPlaceholderText("Введите или выберите тип детали")
         layout.addRow("Тип детали", self.part_type_combo)
 
         # --- Номинал / значение ---
@@ -64,7 +65,6 @@ class PartDialog(QDialog):
         self.unit_combo = QComboBox()
         self.unit_combo.setEditable(False)
         self.unit_combo.setMinimumWidth(80)
-        self.unit_combo.addItems(["", "Ом", "кОм", "МОм", "нФ", "мкФ", "пФ", "Ф", "Гн", "мГн", "мкГн", "В", "А", "мА"])
         nominal_layout.addWidget(self.value_edit)
         nominal_layout.addWidget(self.unit_combo)
         layout.addRow("Номинал / значение", nominal_widget)
@@ -115,6 +115,7 @@ class PartDialog(QDialog):
         dims_layout.addRow("Толщина выводов (мм)", self.lead_diameter_spin)
         
         layout.addRow("Габариты (для конденсаторов)", self.dims_group)
+        self.dims_group.setVisible(False)
 
         # --- Состояние ---
         self.status_combo = QComboBox()
@@ -129,6 +130,7 @@ class PartDialog(QDialog):
         # --- Производитель (выпадающий список с редактированием) ---
         self.manufacturer_combo = QComboBox()
         self.manufacturer_combo.setEditable(True)
+        self.manufacturer_combo.setPlaceholderText("Введите или выберите производителя")
         layout.addRow("Производитель", self.manufacturer_combo)
 
         # --- Артикул (MPN) ---
@@ -226,25 +228,56 @@ class PartDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
-        # Дополнительная инициализация: заполняем выпадающие списки, скрываем размеры по умолчанию
-        self.dims_group.setVisible(False)
+        # Загружаем выпадающие списки из БД
         self._load_comboboxes()
 
     def _load_comboboxes(self):
         """Загружает значения для типов деталей и производителей из БД"""
-        part_types = sorted(set(self.db.get_dictionary_values('part_type')))
+        part_types = set(self.db.get_dictionary_values('part_type'))
+        for part in self.db.get_all_parts_filtered():
+            pt = part.get('part_type')
+            if pt:
+                part_types.add(pt)
         self.part_type_combo.clear()
-        self.part_type_combo.addItems(part_types)
-        manufacturers = sorted(set(self.db.get_dictionary_values('manufacturer')))
-        self.manufacturer_combo.clear()
-        self.manufacturer_combo.addItems(manufacturers)
+        self.part_type_combo.addItems(sorted(part_types))
 
-    def _show_dims_for_capacitor(self, category_path):
-        """Показывает блок размеров, если категория содержит 'конденсатор'"""
-        if category_path and 'конденсатор' in category_path.lower():
-            self.dims_group.setVisible(True)
+        manufacturers = set(self.db.get_dictionary_values('manufacturer'))
+        for part in self.db.get_all_parts_filtered():
+            m = part.get('manufacturer')
+            if m:
+                manufacturers.add(m)
+        self.manufacturer_combo.clear()
+        self.manufacturer_combo.addItems(sorted(manufacturers))
+
+    def _update_units_by_category(self, category_path):
+        """Обновляет список единиц измерения в зависимости от категории"""
+        path_lower = category_path.lower()
+        if "конденсатор" in path_lower:
+            units = ["", "пФ", "нФ", "мкФ", "Ф"]
+        elif "резистор" in path_lower:
+            units = ["", "Ом", "кОм", "МОм"]
+        elif "катушк" in path_lower or "индуктивност" in path_lower:
+            units = ["", "мкГн", "мГн", "Гн"]
         else:
-            self.dims_group.setVisible(False)
+            units = ["", "Ом", "кОм", "МОм", "нФ", "мкФ", "пФ", "Ф", "Гн", "мГн", "мкГн", "В", "А", "мА"]
+        combo = self.unit_combo
+        current = combo.currentText()
+        combo.clear()
+        combo.addItems(units)
+        if current in units:
+            combo.setCurrentText(current)
+        else:
+            combo.setCurrentIndex(0)
+
+    def _extract_power_from_category(self, category_path):
+        """Извлекает мощность (например, 0.5 W) из последнего сегмента категории"""
+        if not category_path:
+            return ''
+        last_part = category_path.split('/')[-1].strip()
+        match = re.search(r'([\d\.]+)\s*[WВт]', last_part, re.IGNORECASE)
+        if match:
+            return f"{match.group(1)} Вт"
+        return ''
 
     def _open_category_selector(self):
         dialog = CategorySelectorDialog(self, db=self.db, selected_category=self.category_edit.text(), start_depth=self.start_depth)
@@ -253,16 +286,26 @@ class PartDialog(QDialog):
 
     def _on_category_selected(self, category_path):
         self.category_edit.setText(category_path)
+        self._update_units_by_category(category_path)
         self._show_dims_for_capacitor(category_path)
+
+    def _show_dims_for_capacitor(self, category_path):
+        """Показывает блок размеров, если категория содержит 'конденсатор'"""
+        if category_path and 'конденсатор' in category_path.lower():
+            self.dims_group.setVisible(True)
+        else:
+            self.dims_group.setVisible(False)
 
     # ---------- Парсинг номинала (убрано .0) ----------
     def _parse_and_normalize(self, raw_text: str):
+        """Распознаёт число и единицу из строки, поддерживает пробел между ними."""
         if not raw_text:
             return None, "", ""
-        match = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Zμµ]?[a-zA-Z]?)$", raw_text.strip())
+        text = raw_text.strip()
+        match = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Zμµ]?[a-zA-Z]*)$", text)
         if not match:
             try:
-                num = float(raw_text)
+                num = float(text)
                 if num.is_integer():
                     num = int(num)
                 return num, "", str(num)
@@ -300,19 +343,51 @@ class PartDialog(QDialog):
 
     def _assemble_name(self):
         category_path = self.category_edit.text().strip()
-        category_name = category_path.split('/')[-1].strip() if category_path else ""
-        value_raw = self.value_edit.text().strip()
-        _, unit, normalized = self._parse_and_normalize(value_raw)
-        value_part = normalized if normalized else value_raw
+        voltage = ''
+        power = ''
+        if category_path:
+            last_part = category_path.split('/')[-1].strip()
+            if re.search(r'\d+V', last_part, re.IGNORECASE):
+                voltage = last_part
+            else:
+                power = self._extract_power_from_category(category_path)
+        
+        raw_value = self.value_edit.text().strip()
+        numeric, unit, normalized = self._parse_and_normalize(raw_value)
+        
+        # Если единица не распознана, но выбрана в комбобоксе – берём её
+        if not unit and self.unit_combo.currentText():
+            unit = self.unit_combo.currentText()
+            if numeric is not None:
+                normalized = f"{numeric} {unit}"
+            else:
+                normalized = unit
+        
+        if unit:
+            value_part = normalized
+        elif numeric is not None:
+            value_part = str(numeric)
+        else:
+            value_part = raw_value
+        
         package = self.package_combo.currentText().strip()
-        parts = [p for p in (category_name, value_part, package) if p]
-        assembled = " ".join(parts)
+        name_parts = []
+        if value_part:
+            name_parts.append(value_part)
+        if voltage:
+            name_parts.append(voltage)
+        if power:
+            name_parts.append(power)
+        if package:
+            name_parts.append(package)
+        
+        assembled = " ".join(name_parts)
         if assembled:
             self.name_edit.setText(assembled)
         else:
-            QMessageBox.information(self, "Невозможно собрать", "Заполните хотя бы категорию, номинал или корпус.")
+            QMessageBox.information(self, "Невозможно собрать", "Заполните хотя бы номинал или выберите категорию с параметрами")
 
-    # ---------- Вспомогательные методы (каскадные обновления, работа с категориями) ----------
+    # ---------- Вспомогательные методы ----------
     def _browse_file(self, line_edit, filter_str):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите файл", "", filter_str)
         if path:
@@ -413,10 +488,11 @@ class PartDialog(QDialog):
             cats = self.db.get_categories()
             path = self._build_category_path(cat_id, cats)
             self.category_edit.setText(path)
+            self._update_units_by_category(path)
             self._show_dims_for_capacitor(path)
         else:
             self.category_edit.setText("")
-        # Тип детали (комбобокс)
+        # Тип детали
         part_type_val = data.get('part_type', '')
         idx = self.part_type_combo.findText(part_type_val)
         if idx >= 0:
@@ -502,10 +578,13 @@ class PartDialog(QDialog):
         if not self.name_edit.text().strip():
             QMessageBox.warning(self, "Ошибка", "⚠️ Наименование обязательно!")
             return
-        # Добавляем новые значения в словари (если их ещё нет)
+        # Добавляем новые значения в словари через БД (метод add_dictionary_value)
         part_type = self.part_type_combo.currentText().strip()
+        if part_type:
+            self.db.add_dictionary_value('part_type', part_type)
         manufacturer = self.manufacturer_combo.currentText().strip()
-        # Здесь можно добавить вызов методов БД для сохранения новых значений
+        if manufacturer:
+            self.db.add_dictionary_value('manufacturer', manufacturer)
         self.accept()
 
     def get_location_string(self):
