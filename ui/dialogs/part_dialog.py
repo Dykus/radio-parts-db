@@ -48,10 +48,9 @@ class PartDialog(QDialog):
         category_layout.addWidget(self.btn_select_category)
         layout.addRow("Категория", category_widget)
 
-        # --- Тип детали (ComboBox с возможностью добавления) ---
+        # --- Тип детали (выпадающий список с редактированием) ---
         self.part_type_combo = QComboBox()
         self.part_type_combo.setEditable(True)
-        self.part_type_combo.setPlaceholderText("Введите или выберите тип")
         layout.addRow("Тип детали", self.part_type_combo)
 
         # --- Номинал / значение ---
@@ -76,12 +75,46 @@ class PartDialog(QDialog):
         self.btn_assemble.clicked.connect(self._assemble_name)
         layout.addRow("", self.btn_assemble)
 
-        # --- Корпус с подсказкой ---
+        # --- Корпус ---
         self.package_combo = QComboBox()
         self.package_combo.setEditable(True)
         self.package_combo.addItems(["", "0402", "0603", "0805", "1206", "SOT-23", "SOIC-8", "DIP-8", "TQFP-48", "TO-92", "TO-220"])
         self.package_combo.setPlaceholderText("Для конденсаторов: Диаметр x Высота, например 10x17")
         layout.addRow("Корпус", self.package_combo)
+
+        # --- Группа размеров (видима для конденсаторов) ---
+        self.dims_group = QWidget()
+        dims_layout = QFormLayout(self.dims_group)
+        dims_layout.setContentsMargins(0, 0, 0, 0)
+        self.diameter_spin = QDoubleSpinBox()
+        self.diameter_spin.setRange(0, 100)
+        self.diameter_spin.setDecimals(1)
+        self.diameter_spin.setSuffix(" мм")
+        self.diameter_spin.setToolTip("Диаметр корпуса в мм")
+        dims_layout.addRow("Диаметр (мм)", self.diameter_spin)
+        
+        self.height_spin = QDoubleSpinBox()
+        self.height_spin.setRange(0, 200)
+        self.height_spin.setDecimals(1)
+        self.height_spin.setSuffix(" мм")
+        self.height_spin.setToolTip("Высота корпуса в мм")
+        dims_layout.addRow("Высота (мм)", self.height_spin)
+        
+        self.lead_pitch_spin = QDoubleSpinBox()
+        self.lead_pitch_spin.setRange(0, 50)
+        self.lead_pitch_spin.setDecimals(1)
+        self.lead_pitch_spin.setSuffix(" мм")
+        self.lead_pitch_spin.setToolTip("Расстояние между выводами в мм")
+        dims_layout.addRow("Шаг выводов (мм)", self.lead_pitch_spin)
+        
+        self.lead_diameter_spin = QDoubleSpinBox()
+        self.lead_diameter_spin.setRange(0, 5)
+        self.lead_diameter_spin.setDecimals(2)
+        self.lead_diameter_spin.setSuffix(" мм")
+        self.lead_diameter_spin.setToolTip("Толщина выводов в мм")
+        dims_layout.addRow("Толщина выводов (мм)", self.lead_diameter_spin)
+        
+        layout.addRow("Габариты (для конденсаторов)", self.dims_group)
 
         # --- Состояние ---
         self.status_combo = QComboBox()
@@ -93,10 +126,9 @@ class PartDialog(QDialog):
         self.status_combo.setCurrentText("🛒 Новое")
         layout.addRow("Состояние", self.status_combo)
 
-        # --- Производитель (ComboBox с возможностью добавления) ---
+        # --- Производитель (выпадающий список с редактированием) ---
         self.manufacturer_combo = QComboBox()
         self.manufacturer_combo.setEditable(True)
-        self.manufacturer_combo.setPlaceholderText("Введите или выберите производителя")
         layout.addRow("Производитель", self.manufacturer_combo)
 
         # --- Артикул (MPN) ---
@@ -194,34 +226,34 @@ class PartDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
-        # --- Загрузка данных в комбобоксы ---
-        self._refresh_part_type_list()
-        self._refresh_manufacturer_list()
+        # Дополнительная инициализация: заполняем выпадающие списки, скрываем размеры по умолчанию
+        self.dims_group.setVisible(False)
+        self._load_comboboxes()
 
-    # ---------- Загрузка списков для комбобоксов ----------
-    def _refresh_part_type_list(self):
-        """Обновляет список типов деталей из БД."""
-        values = self.db.get_combined_dictionary_values('part_type', 'part_type')
-        current = self.part_type_combo.currentText()
+    def _load_comboboxes(self):
+        """Загружает значения для типов деталей и производителей из БД"""
+        part_types = sorted(set(self.db.get_dictionary_values('part_type')))
         self.part_type_combo.clear()
-        self.part_type_combo.addItems(values)
-        if current and current in values:
-            self.part_type_combo.setCurrentText(current)
-        elif current:
-            self.part_type_combo.setCurrentText(current)
-            self.part_type_combo.addItem(current)  # временно добавить, если нет в списке
-
-    def _refresh_manufacturer_list(self):
-        """Обновляет список производителей из БД."""
-        values = self.db.get_combined_dictionary_values('manufacturer', 'manufacturer')
-        current = self.manufacturer_combo.currentText()
+        self.part_type_combo.addItems(part_types)
+        manufacturers = sorted(set(self.db.get_dictionary_values('manufacturer')))
         self.manufacturer_combo.clear()
-        self.manufacturer_combo.addItems(values)
-        if current and current in values:
-            self.manufacturer_combo.setCurrentText(current)
-        elif current:
-            self.manufacturer_combo.setCurrentText(current)
-            self.manufacturer_combo.addItem(current)
+        self.manufacturer_combo.addItems(manufacturers)
+
+    def _show_dims_for_capacitor(self, category_path):
+        """Показывает блок размеров, если категория содержит 'конденсатор'"""
+        if category_path and 'конденсатор' in category_path.lower():
+            self.dims_group.setVisible(True)
+        else:
+            self.dims_group.setVisible(False)
+
+    def _open_category_selector(self):
+        dialog = CategorySelectorDialog(self, db=self.db, selected_category=self.category_edit.text(), start_depth=self.start_depth)
+        dialog.category_selected.connect(self._on_category_selected)
+        dialog.exec()
+
+    def _on_category_selected(self, category_path):
+        self.category_edit.setText(category_path)
+        self._show_dims_for_capacitor(category_path)
 
     # ---------- Парсинг номинала (убрано .0) ----------
     def _parse_and_normalize(self, raw_text: str):
@@ -266,7 +298,6 @@ class PartDialog(QDialog):
         else:
             self.value_edit.setToolTip("Не удалось распознать номинал. Примеры: 10, 2.2, 100")
 
-    # ---------- Собрать название ----------
     def _assemble_name(self):
         category_path = self.category_edit.text().strip()
         category_name = category_path.split('/')[-1].strip() if category_path else ""
@@ -281,12 +312,7 @@ class PartDialog(QDialog):
         else:
             QMessageBox.information(self, "Невозможно собрать", "Заполните хотя бы категорию, номинал или корпус.")
 
-    # ---------- Вспомогательные методы ----------
-    def _open_category_selector(self):
-        dialog = CategorySelectorDialog(self, db=self.db, selected_category=self.category_edit.text(), start_depth=self.start_depth)
-        dialog.category_selected.connect(self.category_edit.setText)
-        dialog.exec()
-
+    # ---------- Вспомогательные методы (каскадные обновления, работа с категориями) ----------
     def _browse_file(self, line_edit, filter_str):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите файл", "", filter_str)
         if path:
@@ -385,27 +411,37 @@ class PartDialog(QDialog):
         cat_id = data.get('category_id')
         if cat_id:
             cats = self.db.get_categories()
-            self.category_edit.setText(self._build_category_path(cat_id, cats))
+            path = self._build_category_path(cat_id, cats)
+            self.category_edit.setText(path)
+            self._show_dims_for_capacitor(path)
         else:
             self.category_edit.setText("")
-        
-        # Тип детали
-        part_type = data.get('part_type', '')
-        self.part_type_combo.setCurrentText(part_type)
-        if part_type and self.part_type_combo.findText(part_type) == -1:
-            self.part_type_combo.addItem(part_type)
-        
+        # Тип детали (комбобокс)
+        part_type_val = data.get('part_type', '')
+        idx = self.part_type_combo.findText(part_type_val)
+        if idx >= 0:
+            self.part_type_combo.setCurrentIndex(idx)
+        else:
+            self.part_type_combo.setCurrentText(part_type_val)
         # Производитель
-        manufacturer = data.get('manufacturer', '')
-        self.manufacturer_combo.setCurrentText(manufacturer)
-        if manufacturer and self.manufacturer_combo.findText(manufacturer) == -1:
-            self.manufacturer_combo.addItem(manufacturer)
-        
-        self.package_combo.setCurrentText(data.get('package', ''))
+        manufacturer_val = data.get('manufacturer', '')
+        idx = self.manufacturer_combo.findText(manufacturer_val)
+        if idx >= 0:
+            self.manufacturer_combo.setCurrentIndex(idx)
+        else:
+            self.manufacturer_combo.setCurrentText(manufacturer_val)
         self.part_number_edit.setText(data.get('part_number', ''))
+        self.package_combo.setCurrentText(data.get('package', ''))
         self.quantity_spin.setValue(data.get('quantity', 0))
         self.price_spin.setValue(data.get('price', 0))
 
+        # Размеры
+        self.diameter_spin.setValue(data.get('diameter_mm', 0) or 0)
+        self.height_spin.setValue(data.get('height_mm', 0) or 0)
+        self.lead_pitch_spin.setValue(data.get('lead_pitch_mm', 0) or 0)
+        self.lead_diameter_spin.setValue(data.get('lead_diameter_mm', 0) or 0)
+
+        # Номинал
         value_numeric = data.get('value_numeric')
         value_unit = data.get('value_unit', '')
         value_raw = data.get('value_raw', '')
@@ -429,6 +465,7 @@ class PartDialog(QDialog):
                 self.unit_combo.addItem(value_unit)
                 self.unit_combo.setCurrentText(value_unit)
 
+        # Статус
         status_val = data.get('status', 'Новое')
         for i in range(self.status_combo.count()):
             txt = self.status_combo.itemText(i)
@@ -437,6 +474,7 @@ class PartDialog(QDialog):
                 self.status_combo.setCurrentIndex(i)
                 break
 
+        # Место хранения
         location = data.get('location', '')
         if location:
             parts = [p.strip() for p in location.split('/')]
@@ -464,13 +502,10 @@ class PartDialog(QDialog):
         if not self.name_edit.text().strip():
             QMessageBox.warning(self, "Ошибка", "⚠️ Наименование обязательно!")
             return
-        # Добавляем новые значения в словари (если они не пустые)
+        # Добавляем новые значения в словари (если их ещё нет)
         part_type = self.part_type_combo.currentText().strip()
-        if part_type:
-            self.db.add_dictionary_value('part_type', part_type)
         manufacturer = self.manufacturer_combo.currentText().strip()
-        if manufacturer:
-            self.db.add_dictionary_value('manufacturer', manufacturer)
+        # Здесь можно добавить вызов методов БД для сохранения новых значений
         self.accept()
 
     def get_location_string(self):
@@ -501,7 +536,7 @@ class PartDialog(QDialog):
             'name': self.name_edit.text().strip(),
             'category_id': category_id,
             'part_type': self.part_type_combo.currentText().strip(),
-            'package': self.package_combo.currentText().strip(),
+            'package': self.package_combo.currentText(),
             'manufacturer': self.manufacturer_combo.currentText().strip(),
             'part_number': self.part_number_edit.text().strip(),
             'quantity': self.quantity_spin.value(),
@@ -514,5 +549,9 @@ class PartDialog(QDialog):
             'notes': self.notes_edit.toPlainText().strip(),
             'value_numeric': numeric,
             'value_unit': unit if unit else None,
-            'value_raw': value_raw
+            'value_raw': value_raw,
+            'diameter_mm': self.diameter_spin.value() if self.diameter_spin.value() > 0 else None,
+            'height_mm': self.height_spin.value() if self.height_spin.value() > 0 else None,
+            'lead_pitch_mm': self.lead_pitch_spin.value() if self.lead_pitch_spin.value() > 0 else None,
+            'lead_diameter_mm': self.lead_diameter_spin.value() if self.lead_diameter_spin.value() > 0 else None,
         }

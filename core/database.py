@@ -7,10 +7,7 @@ from pathlib import Path
 from contextlib import contextmanager
 from typing import Optional, List, Dict, Any
 
-# ==============================================================================
-# ⚠️ ВАЖНО: ИЗМЕНЕНИЕ СТРУКТУРЫ БАЗЫ ДАННЫХ
-# ==============================================================================
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 logger = logging.getLogger(__name__)
 
 class Database:
@@ -21,6 +18,7 @@ class Database:
             1: self._migration_v1_initial,
             2: self._migration_v2_russian_statuses,
             3: self._migration_v3_add_nominal_fields,
+            4: self._migration_v4_add_capacitor_dimensions,
         }
 
     def connect(self):
@@ -143,7 +141,15 @@ class Database:
         cursor.execute("ALTER TABLE parts ADD COLUMN value_unit TEXT")
         cursor.execute("ALTER TABLE parts ADD COLUMN value_raw TEXT")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_value_unit ON parts(value_unit)")
-        logger.info("✅ Добавлены поля value_numeric, value_unit, value_raw в таблицу parts")
+        logger.info("✅ Добавлены поля value_numeric, value_unit, value_raw")
+
+    def _migration_v4_add_capacitor_dimensions(self, cursor):
+        """Добавляем поля для габаритов конденсаторов"""
+        cursor.execute("ALTER TABLE parts ADD COLUMN diameter_mm REAL")
+        cursor.execute("ALTER TABLE parts ADD COLUMN height_mm REAL")
+        cursor.execute("ALTER TABLE parts ADD COLUMN lead_pitch_mm REAL")
+        cursor.execute("ALTER TABLE parts ADD COLUMN lead_diameter_mm REAL")
+        logger.info("✅ Добавлены поля диаметр, высота, шаг выводов, толщина выводов")
 
     # ==================== КАТЕГОРИИ ====================
     def _get_all_descendant_ids(self, cat_id: int, cursor) -> List[int]:
@@ -191,7 +197,10 @@ class Database:
 
     def get_all_parts_filtered(self, category_id=None, filter_type="all", location_path=None) -> List[Dict[str, Any]]:
         with self.get_cursor() as cursor:
-            query = "SELECT id, name, part_type, package, quantity, price, location, status, value_numeric, value_unit, value_raw, category_id, image_path FROM parts WHERE 1=1"
+            query = """SELECT id, name, part_type, package, quantity, price, location, status,
+                              value_numeric, value_unit, value_raw, category_id, image_path,
+                              diameter_mm, height_mm, lead_pitch_mm, lead_diameter_mm
+                       FROM parts WHERE 1=1"""
             params = []
             
             if category_id is not None:
@@ -217,41 +226,10 @@ class Database:
             cursor.execute("SELECT id, name, parent_id FROM categories ORDER BY name")
             return cursor.fetchall()
 
-    # ==================== СПРАВОЧНИКИ ====================
     def get_dictionary_values(self, dict_type: str) -> List[str]:
-        """Возвращает значения из таблицы dictionaries для указанного типа."""
         with self.get_cursor() as cursor:
-            cursor.execute("SELECT value FROM dictionaries WHERE type = ? ORDER BY value", (dict_type,))
+            cursor.execute("SELECT value FROM dictionaries WHERE type = ?", (dict_type,))
             return [row[0] for row in cursor.fetchall()]
-
-    def add_dictionary_value(self, dict_type: str, value: str) -> bool:
-        """Добавляет новое значение в словарь, если его ещё нет. Возвращает True, если добавлено."""
-        if not value or not value.strip():
-            return False
-        with self.get_cursor() as cursor:
-            try:
-                cursor.execute("INSERT OR IGNORE INTO dictionaries (type, value) VALUES (?, ?)", (dict_type, value.strip()))
-                return cursor.rowcount > 0
-            except Exception as e:
-                logger.error(f"Ошибка добавления в словарь {dict_type}: {e}")
-                return False
-
-    def get_combined_dictionary_values(self, dict_type: str, field_name: str) -> List[str]:
-        """
-        Возвращает объединённый список уникальных значений:
-        - из таблицы dictionaries (тип dict_type)
-        - из поля field_name таблицы parts (не NULL и не пустые)
-        """
-        values = set()
-        # Из справочника
-        values.update(self.get_dictionary_values(dict_type))
-        # Из существующих деталей
-        with self.get_cursor() as cursor:
-            cursor.execute(f"SELECT DISTINCT {field_name} FROM parts WHERE {field_name} IS NOT NULL AND trim({field_name}) != ''")
-            for row in cursor.fetchall():
-                if row[0]:
-                    values.add(row[0])
-        return sorted(values)
 
     def get_stats(self) -> Dict[str, Any]:
         with self.get_cursor() as cursor:
@@ -272,14 +250,16 @@ class Database:
             cursor.execute("""INSERT INTO parts (
                 name, category_id, part_type, package, manufacturer, part_number,
                 quantity, price, location, status, image_path, datasheet_path, notes, revision_date,
-                value_numeric, value_unit, value_raw
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
+                value_numeric, value_unit, value_raw,
+                diameter_mm, height_mm, lead_pitch_mm, lead_diameter_mm
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
                 (data['name'], data.get('category_id'), data.get('part_type'), data.get('package'),
                  data.get('manufacturer'), data.get('part_number'), data.get('quantity', 0),
                  data.get('price', 0), data.get('location'), data.get('status', 'Новое'),
                  data.get('image_path'), data.get('datasheet_path'), data.get('notes'),
                  data.get('revision_date'), data.get('value_numeric'), data.get('value_unit'),
-                 data.get('value_raw')))
+                 data.get('value_raw'),
+                 data.get('diameter_mm'), data.get('height_mm'), data.get('lead_pitch_mm'), data.get('lead_diameter_mm')))
             return cursor.lastrowid
 
     def create_category(self, name: str, parent_id=None, description="") -> int:
@@ -296,7 +276,8 @@ class Database:
                     name=?, category_id=?, part_type=?, package=?, manufacturer=?, part_number=?,
                     quantity=?, price=?, location=?, status=?, image_path=?, 
                     datasheet_path=?, notes=?, revision_date=?, updated_at=CURRENT_TIMESTAMP,
-                    value_numeric=?, value_unit=?, value_raw=?
+                    value_numeric=?, value_unit=?, value_raw=?,
+                    diameter_mm=?, height_mm=?, lead_pitch_mm=?, lead_diameter_mm=?
                 WHERE id=?
             """, (
                 data['name'], data.get('category_id'), data.get('part_type'),
@@ -304,7 +285,9 @@ class Database:
                 data.get('quantity', 0), data.get('price', 0), data.get('location'),
                 data.get('status', 'Новое'), data.get('image_path'),
                 data.get('datasheet_path'), data.get('notes'), data.get('revision_date'),
-                data.get('value_numeric'), data.get('value_unit'), data.get('value_raw'), part_id
+                data.get('value_numeric'), data.get('value_unit'), data.get('value_raw'),
+                data.get('diameter_mm'), data.get('height_mm'), data.get('lead_pitch_mm'), data.get('lead_diameter_mm'),
+                part_id
             ))
 
     def delete_part(self, part_id: int, reason: str = "deleted_by_user"):

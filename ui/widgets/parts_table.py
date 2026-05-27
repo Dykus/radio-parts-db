@@ -13,6 +13,30 @@ class PartsTableModel(QStandardItemModel):
         self.setHorizontalHeaderLabels(["ID", "Наименование", "Тип", "Корпус", "Кол-во", "Цена", "Место", "Состояние"])
         self.load_data()
 
+    def _format_package_with_dimensions(self, package, dims):
+        """Формирует строку для колонки «Корпус»: package + размеры (если есть)"""
+        if not dims:
+            return package or ''
+        parts = []
+        if package:
+            parts.append(package)
+        # Безопасно получаем значения, заменяя None на 0
+        diam = dims.get('diameter_mm') or 0
+        height = dims.get('height_mm') or 0
+        pitch = dims.get('lead_pitch_mm') or 0
+        lead_d = dims.get('lead_diameter_mm') or 0
+        if diam > 0 and height > 0:
+            parts.append(f"⌀{diam}×{height}мм")
+        elif diam > 0:
+            parts.append(f"⌀{diam}мм")
+        elif height > 0:
+            parts.append(f"высота {height}мм")
+        if pitch > 0:
+            parts.append(f"шаг {pitch}мм")
+        if lead_d > 0:
+            parts.append(f"вывод {lead_d}мм")
+        return ' / '.join(parts) if parts else (package or '')
+
     def load_data(self, category_id=None, filter_type="all", location_path=None):
         self.removeRows(0, self.rowCount())
         parts = self.db.get_all_parts_filtered(category_id, filter_type, location_path)
@@ -29,7 +53,15 @@ class PartsTableModel(QStandardItemModel):
         for p in parts:
             has_photo = bool(p.get('image_path') and p['image_path'].strip())
             package_text = p.get('package') or ''
-            display_package = f"📷 {package_text}" if has_photo else package_text
+            dims = {
+                'diameter_mm': p.get('diameter_mm'),
+                'height_mm': p.get('height_mm'),
+                'lead_pitch_mm': p.get('lead_pitch_mm'),
+                'lead_diameter_mm': p.get('lead_diameter_mm'),
+            }
+            display_package = self._format_package_with_dimensions(package_text, dims)
+            if has_photo:
+                display_package = f"📷 {display_package}"
             
             items = [
                 QStandardItem(str(p['id'])),
