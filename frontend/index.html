@@ -3,13 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RadioPartsDB Web SPA (beta)</title>
+    <title>RadioPartsDB Web SPA</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #f8f9fa; }
-        .qty-high { background-color: #d1e7dd; color: #0f5132; }
-        .qty-low { background-color: #fff3cd; color: #664d03; }
-        .qty-out { background-color: #f8d7da; color: #842029; }
+        /* Дерево категорий (оставляем как было) */
         .category-tree {
             max-height: 70vh;
             overflow-y: auto;
@@ -21,25 +19,34 @@
             cursor: pointer;
             padding: 4px 8px;
             border-radius: 4px;
+            display: flex;
+            align-items: center;
         }
-        .category-item:hover {
-            background-color: #e9ecef;
+        .category-item:hover { background-color: #e9ecef; }
+        .category-active { background-color: #0d6efd; color: white; }
+        .category-children { margin-left: 20px; display: none; }
+        .toggle-icon {
+            cursor: pointer;
+            width: 20px;
+            display: inline-block;
+            margin-right: 4px;
+            font-size: 12px;
         }
-        .category-active {
-            background-color: #0d6efd;
-            color: white;
-        }
-        .category-children {
-            margin-left: 20px;
-        }
+        .modal-lg { max-width: 800px; }
+        .form-label { font-weight: 500; }
+        /* Дополнительно для таблицы — убираем hover-эффекты Bootstrap */
+        .table-hover tbody tr:hover { background-color: inherit !important; }
     </style>
 </head>
 <body>
 
 <nav class="navbar navbar-dark bg-dark mb-4">
     <div class="container">
-        <span class="navbar-brand">RadioPartsDB <small class="text-white-50">SPA (beta)</small></span>
-        <button class="btn btn-outline-light btn-sm" id="refreshBtn">🔄 Обновить</button>
+        <span class="navbar-brand">RadioPartsDB <small class="text-white-50">с редактированием</small></span>
+        <div>
+            <button class="btn btn-success btn-sm me-2" id="addPartBtn">➕ Добавить деталь</button>
+            <button class="btn btn-outline-light btn-sm" id="refreshBtn">🔄 Обновить</button>
+        </div>
     </div>
 </nav>
 
@@ -47,11 +54,15 @@
     <div class="row">
         <div class="col-md-3">
             <div class="card">
-                <div class="card-header bg-primary text-white">📂 Категории</div>
-                <div class="card-body p-0">
-                    <div id="categoriesTree" class="category-tree">
-                        <div class="text-center p-3">Загрузка категорий...</div>
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <span>📂 Категории</span>
+                    <div>
+                        <button class="btn btn-sm btn-light" id="expandAllBtn">➕</button>
+                        <button class="btn btn-sm btn-light" id="collapseAllBtn">➖</button>
                     </div>
+                </div>
+                <div class="card-body p-0">
+                    <div id="categoriesTree" class="category-tree">Загрузка категорий...</div>
                 </div>
             </div>
         </div>
@@ -78,8 +89,12 @@
                 <div class="card-body p-0">
                     <div class="table-responsive">
                         <table class="table table-hover mb-0 align-middle">
-                            <thead class="table-light"><tr><th>ID</th><th>Наименование</th><th>Тип</th><th>Корпус</th><th class="text-center">Кол-во</th><th class="text-end">Цена</th><th>Место</th><th>Статус</th></tr></thead>
-                            <tbody id="table-body"><tr><td colspan="8" class="text-center py-4">⏳ Загрузка...</td></tr></tbody>
+                            <thead class="table-light">
+                                <tr><th>ID</th><th>Наименование</th><th>Тип</th><th>Корпус</th><th class="text-center">Кол-во</th><th class="text-end">Цена</th><th>Место</th><th>Статус</th><th></th></tr>
+                            </thead>
+                            <tbody id="table-body">
+                                <tr><td colspan="9" class="text-center py-4">⏳ Загрузка...</td></tr>
+                            </tbody>
                         </table>
                     </div>
                 </div>
@@ -88,174 +103,397 @@
     </div>
 </div>
 
+<!-- Модальное окно детали -->
+<div class="modal fade" id="partModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Деталь</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <form id="partForm">
+                <input type="hidden" id="partId">
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Наименование *</label><div class="col-sm-9"><input type="text" class="form-control" id="name" required></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Категория</label><div class="col-sm-7"><input type="text" class="form-control" id="categoryPath" readonly></div><div class="col-sm-2"><button type="button" class="btn btn-outline-secondary w-100" id="selectCategoryBtn">📂 Выбрать</button></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Тип детали</label><div class="col-sm-9"><input type="text" class="form-control" id="partType"></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Номинал</label><div class="col-sm-4"><input type="text" class="form-control" id="valueNumeric" placeholder="Число"></div><div class="col-sm-5"><select id="valueUnit" class="form-select"><option value="">-- единица --</option></select></div></div>
+                <div class="row mb-3"><div class="col-sm-3"></div><div class="col-sm-9"><button type="button" class="btn btn-primary" id="assembleNameBtn">🧩 Собрать название</button></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Корпус</label><div class="col-sm-9"><input type="text" class="form-control" id="package"></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Состояние</label><div class="col-sm-9"><select id="status" class="form-select"><option>Новое</option><option>Б/У проверено</option><option>Б/У не проверено</option><option>Отличное</option><option>Хорошее</option><option>Плохое</option><option>Неисправно</option></select></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Производитель</label><div class="col-sm-9"><input type="text" class="form-control" id="manufacturer"></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Артикул</label><div class="col-sm-9"><input type="text" class="form-control" id="mpn"></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Количество</label><div class="col-sm-3"><input type="number" class="form-control" id="quantity" value="0"></div><label class="col-sm-2 col-form-label">Цена, ₽</label><div class="col-sm-4"><input type="number" step="0.01" class="form-control" id="price" value="0"></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Место хранения</label><div class="col-sm-9"><div class="row g-1"><div class="col"><input type="text" class="form-control" id="locPlace" placeholder="Место"></div><div class="col"><input type="text" class="form-control" id="locContainer" placeholder="Контейнер"></div><div class="col"><input type="text" class="form-control" id="locShelf" placeholder="Полка"></div><div class="col"><input type="text" class="form-control" id="locSection" placeholder="Секция"></div></div></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Изображение URL</label><div class="col-sm-9"><input type="text" class="form-control" id="imagePath"></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Даташит URL</label><div class="col-sm-9"><input type="text" class="form-control" id="datasheetPath"></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Дата ревизии</label><div class="col-sm-9"><input type="date" class="form-control" id="revisionDate"></div></div>
+                <div class="row mb-3"><label class="col-sm-3 col-form-label">Заметки</label><div class="col-sm-9"><textarea class="form-control" id="notes" rows="2"></textarea></div></div>
+            </form>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button><button type="button" class="btn btn-primary" id="savePartBtn">Сохранить</button></div>
+    </div></div>
+</div>
+
+<div class="modal fade" id="categoryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Выберите категорию</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body"><div id="categoryTreeModal" class="category-tree"></div></div>
+    </div></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     const API_BASE = 'http://localhost:8000';
-    let currentCategoryIds = [];   // список ID выбранной категории + всех её потомков
+    let currentCategoryIds = [];
     let currentFilter = 'all';
     let allParts = [];
-    let flatCategories = [];        // плоский список всех категорий
+    let flatCategories = [];
+    let categoryModalInstance, partModalInstance;
 
-    // ---------- вспомогательные функции ----------
-    async function fetchJSON(url) {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json();
+    async function fetchJSON(url, options = {}) {
+        const res = await fetch(url, options);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
     }
 
-    // рекурсивный сбор ID всех подкатегорий
-    function getAllDescendantIds(catId, categoriesFlat) {
-        const result = [catId];
-        const children = categoriesFlat.filter(c => c.parent_id === catId);
-        for (const child of children) {
-            result.push(...getAllDescendantIds(child.id, categoriesFlat));
+    function getAllDescendantIds(catId, cats) {
+        let ids = [catId];
+        cats.filter(c => c.parent_id === catId).forEach(child => {
+            ids.push(...getAllDescendantIds(child.id, cats));
+        });
+        return ids;
+    }
+
+    function buildTreeHTML(cats) {
+        const map = Object.fromEntries(cats.map(c => [c.id, { ...c, children: [] }]));
+        const roots = [];
+        cats.forEach(cat => {
+            if (!cat.parent_id || !map[cat.parent_id]) roots.push(map[cat.id]);
+            else map[cat.parent_id].children.push(map[cat.id]);
+        });
+        function sort(node) { node.children.sort((a,b) => a.name.localeCompare(b.name)); node.children.forEach(sort); }
+        roots.sort((a,b) => a.name.localeCompare(b.name));
+        roots.forEach(sort);
+        function render(node, level) {
+            const hasKids = node.children.length > 0;
+            const icon = hasKids ? '<span class="toggle-icon">▶</span>' : '<span style="width:20px;display:inline-block"></span>';
+            const html = `<div class="category-item" data-id="${node.id}" style="margin-left:${level*20}px">${icon} ${escapeHtml(node.name)}</div>`;
+            let kidsHtml = '';
+            if (hasKids) kidsHtml = `<div class="category-children">${node.children.map(ch => render(ch, level+1)).join('')}</div>`;
+            return `<div class="category-node">${html}${kidsHtml}</div>`;
         }
-        return result;
+        return roots.map(r => render(r, 0)).join('');
     }
 
-    // загрузка категорий и построение дерева
+    function attachToggleHandlers(container) {
+        container.querySelectorAll('.toggle-icon').forEach(icon => {
+            icon.removeEventListener('click', toggleHandler);
+            icon.addEventListener('click', toggleHandler);
+        });
+        function toggleHandler(e) {
+            e.stopPropagation();
+            const icon = e.currentTarget;
+            const childrenDiv = icon.closest('.category-node')?.querySelector('.category-children');
+            if (childrenDiv) {
+                if (childrenDiv.style.display === 'none') {
+                    childrenDiv.style.display = 'block';
+                    icon.textContent = '▼';
+                } else {
+                    childrenDiv.style.display = 'none';
+                    icon.textContent = '▶';
+                }
+            }
+        }
+    }
+
     async function loadCategories() {
         try {
-            flatCategories = await fetchJSON(`${API_BASE}/api/categories`);
+            flatCategories = await fetchJSON(API_BASE + '/api/categories');
             const container = document.getElementById('categoriesTree');
-            if (!flatCategories.length) {
-                container.innerHTML = '<div class="p-3">Нет категорий</div>';
-                return;
-            }
-            // построим дерево
-            const tree = {};
-            const map = {};
-            flatCategories.forEach(cat => {
-                map[cat.id] = { id: cat.id, name: cat.name, parent_id: cat.parent_id, children: [] };
-            });
-            flatCategories.forEach(cat => {
-                if (cat.parent_id === null || cat.parent_id === 0) {
-                    tree[cat.id] = map[cat.id];
-                } else {
-                    if (map[cat.parent_id]) map[cat.parent_id].children.push(map[cat.id]);
-                }
-            });
-            function renderTree(node, level = 0) {
-                let html = `<div style="margin-left: ${level*20}px" class="category-item" data-id="${node.id}">${escapeHtml(node.name)}</div>`;
-                if (node.children.length) {
-                    html += `<div class="category-children">${node.children.map(child => renderTree(child, level+1)).join('')}</div>`;
-                }
-                return html;
-            }
-            let treeHtml = '';
-            for (let id in tree) {
-                treeHtml += renderTree(tree[id]);
-            }
-            container.innerHTML = treeHtml;
-
-            // обработчики кликов
-            document.querySelectorAll('.category-item').forEach(el => {
+            if (!flatCategories.length) { container.innerHTML = '<div class="p-3">Нет категорий</div>'; return; }
+            container.innerHTML = buildTreeHTML(flatCategories);
+            attachToggleHandlers(container);
+            document.querySelectorAll('#categoriesTree .category-item').forEach(el => {
                 el.addEventListener('click', async (e) => {
-                    e.stopPropagation();
-                    const catId = parseInt(el.dataset.id);
-                    // получаем все дочерние ID
-                    currentCategoryIds = getAllDescendantIds(catId, flatCategories);
-                    // визуальное выделение
-                    document.querySelectorAll('.category-item').forEach(c => c.classList.remove('category-active'));
+                    if (e.target.classList.contains('toggle-icon')) return;
+                    const id = parseInt(el.dataset.id);
+                    currentCategoryIds = getAllDescendantIds(id, flatCategories);
+                    document.querySelectorAll('#categoriesTree .category-item').forEach(c => c.classList.remove('category-active'));
                     el.classList.add('category-active');
-                    // перезагружаем таблицу
                     await loadParts();
                 });
             });
-        } catch (e) {
-            console.error(e);
-            document.getElementById('categoriesTree').innerHTML = '<div class="text-danger p-3">Ошибка загрузки категорий</div>';
+            document.getElementById('expandAllBtn').onclick = () => { expandAll(container); };
+            document.getElementById('collapseAllBtn').onclick = () => { collapseAll(container); };
+        } catch(e) { console.error(e); document.getElementById('categoriesTree').innerHTML = '<div class="text-danger">Ошибка</div>'; }
+    }
+
+    function expandAll(container) {
+        container.querySelectorAll('.category-children').forEach(el => el.style.display = 'block');
+        container.querySelectorAll('.toggle-icon').forEach(icon => { if (icon.textContent === '▶') icon.textContent = '▼'; });
+    }
+    function collapseAll(container) {
+        container.querySelectorAll('.category-children').forEach(el => el.style.display = 'none');
+        container.querySelectorAll('.toggle-icon').forEach(icon => { if (icon.textContent === '▼') icon.textContent = '▶'; });
+    }
+
+    function updateUnitsByCategory(catPath) {
+        const low = catPath.toLowerCase();
+        let units = [];
+        if (low.includes('конденсатор')) units = ['пФ','нФ','мкФ','Ф'];
+        else if (low.includes('резистор')) units = ['Ом','кОм','МОм'];
+        else if (low.includes('катушк') || low.includes('индуктивност')) units = ['мкГн','мГн','Гн'];
+        else units = ['Ом','кОм','МОм','пФ','нФ','мкФ','Ф','Гн','мГн','мкГн','В','А','мА'];
+        const sel = document.getElementById('valueUnit');
+        const old = sel.value;
+        sel.innerHTML = '<option value="">-- выберите --</option>';
+        units.forEach(u => { const opt = document.createElement('option'); opt.value = u; opt.text = u; sel.appendChild(opt); });
+        if (units.includes(old)) sel.value = old;
+    }
+
+    function assembleName() {
+        const num = document.getElementById('valueNumeric').value.trim();
+        const unit = document.getElementById('valueUnit').value;
+        const catPath = document.getElementById('categoryPath').value;
+        const pkg = document.getElementById('package').value.trim();
+        let voltage = '';
+        if (catPath) {
+            const last = catPath.split('/').pop().trim();
+            if (/\d+V/i.test(last)) voltage = last;
         }
+        const val = num && unit ? num+unit : num || unit;
+        const name = [val, voltage, pkg].filter(v=>v).join(' ');
+        if (name) document.getElementById('name').value = name;
+        else alert('Заполните номинал или выберите категорию с напряжением');
     }
 
     async function loadParts() {
         try {
-            const parts = await fetchJSON(`${API_BASE}/api/parts?limit=2000`);
+            const parts = await fetchJSON(API_BASE + '/api/parts?limit=2000');
             let filtered = parts;
-            // фильтр по категориям (если выбрана)
-            if (currentCategoryIds.length > 0) {
-                filtered = filtered.filter(p => currentCategoryIds.includes(p.category_id));
-            }
-            // фильтр по наличию
+            if (currentCategoryIds.length) filtered = filtered.filter(p => currentCategoryIds.includes(Number(p.category_id)));
             if (currentFilter === 'in_stock') filtered = filtered.filter(p => p.quantity > 0);
             else if (currentFilter === 'low_stock') filtered = filtered.filter(p => p.quantity > 0 && p.quantity < 10);
             else if (currentFilter === 'out_of_stock') filtered = filtered.filter(p => p.quantity === 0);
-            
             allParts = filtered;
             renderTable(allParts);
             await loadStats();
-        } catch (e) {
-            console.error(e);
-            document.getElementById('table-body').innerHTML = '<tr><td colspan="8" class="text-danger">Ошибка загрузки деталей</td></tr>';
-        }
+        } catch(e) { console.error(e); document.getElementById('table-body').innerHTML = '<td><td colspan="9">Ошибка</td></td>'; }
     }
 
     function renderTable(parts) {
         const tbody = document.getElementById('table-body');
-        if (!parts.length) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4">Нет деталей</td></tr>';
-            return;
-        }
+        if (!parts.length) { tbody.innerHTML = '<tr><td colspan="9" class="text-center">Нет деталей</td></tr>'; return; }
         let html = '';
         for (const p of parts) {
-            let rowClass = '';
-            if (p.quantity > 10) rowClass = 'qty-high';
-            else if (p.quantity > 0) rowClass = 'qty-low';
-            else rowClass = 'qty-out';
-            html += `<tr>
-                <td class="text-muted small">${p.id}</td>
-                <td><strong>${escapeHtml(p.name)}</strong></td>
-                <td>${escapeHtml(p.part_type) || '-'}</td>
-                <td>${escapeHtml(p.package) || '-'}</td>
-                <td class="text-center fw-bold ${rowClass}">${p.quantity}</td>
-                <td class="text-end">${p.price.toFixed(2)} ₽</td>
-                <td>${escapeHtml(p.location) || '-'}</td>
-                <td>${escapeHtml(p.status) || 'Новое'}</td>
-            </tr>`;
+            const qty = Number(p.quantity);
+            // Определяем цвета строки (фон) в зависимости от количества
+            let rowBgColor = '', rowTextColor = '';
+            if (qty > 10) { rowBgColor = '#d1e7dd'; rowTextColor = '#0f5132'; }
+            else if (qty > 0) { rowBgColor = '#fff3cd'; rowTextColor = '#664d03'; }
+            else { rowBgColor = '#f8d7da'; rowTextColor = '#842029'; }
+            // Определяем цвет статуса (фон ячейки)
+            let statusBgColor = '', statusTextColor = '';
+            const statusText = (p.status || '').toLowerCase();
+            if (statusText === 'новое' || statusText === 'отличное') { statusBgColor = '#a5d6a7'; statusTextColor = '#1b5e20'; }
+            else if (statusText === 'б/у проверено') { statusBgColor = '#90caf9'; statusTextColor = '#0d3c5e'; }
+            else if (statusText === 'б/у не проверено') { statusBgColor = '#fff59d'; statusTextColor = '#5d4b0a'; }
+            else if (statusText === 'плохое') { statusBgColor = '#ffcc80'; statusTextColor = '#5d2e0a'; }
+            else if (statusText === 'неисправно') { statusBgColor = '#ef9a9a'; statusTextColor = '#8b0000'; }
+            // Строим строку с inline-стилями
+            html += `<tr style="background-color: ${rowBgColor}; color: ${rowTextColor};">
+                <td class="text-muted small" style="background-color: inherit; color: inherit;">${p.id}</td>
+                <td style="background-color: inherit; color: inherit;"><strong>${escapeHtml(p.name)}</strong></td>
+                <td style="background-color: inherit; color: inherit;">${escapeHtml(p.part_type) || '-'}</td>
+                <td style="background-color: inherit; color: inherit;">${escapeHtml(p.package) || '-'}</td>
+                <td class="text-center" style="background-color: inherit; color: inherit;">${qty}</td>
+                <td class="text-end" style="background-color: inherit; color: inherit;">${p.price.toFixed(2)} ₽</td>
+                <td style="background-color: inherit; color: inherit;">${escapeHtml(p.location) || '-'}</td>
+                <td class="status-cell" style="background-color: ${statusBgColor}; color: ${statusTextColor}; font-weight: bold; text-align: center;">${escapeHtml(p.status) || 'Новое'}</td>
+                <td style="background-color: inherit; color: inherit;"><button class="btn btn-sm btn-outline-secondary edit-btn" data-id="${p.id}">✏️</button></td>
+             </tr>`;
         }
         tbody.innerHTML = html;
-    }
-
-    function escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/[&<>]/g, function(m) {
-            if (m === '&') return '&amp;';
-            if (m === '<') return '&lt;';
-            if (m === '>') return '&gt;';
-            return m;
+        document.querySelectorAll('.edit-btn').forEach(btn => {
+            btn.addEventListener('click', () => openEditModal(parseInt(btn.dataset.id)));
         });
     }
 
     async function loadStats() {
         try {
-            const stats = await fetchJSON(`${API_BASE}/api/stats`);
-            const statsHtml = `
-                <div class="col-md-4"><div class="card text-white bg-success"><div class="card-body"><h5 class="card-title">📦 Всего деталей</h5><h2>${stats.total_parts}</h2></div></div></div>
-                <div class="col-md-4"><div class="card text-white bg-info"><div class="card-body"><h5 class="card-title">💰 Общая стоимость</h5><h2>${stats.total_value.toLocaleString()} ₽</h2></div></div></div>
-                <div class="col-md-4"><div class="card text-white bg-warning"><div class="card-body"><h5 class="card-title">📍 Уникальных мест</h5><h2>${stats.unique_locations || 0}</h2></div></div></div>
+            const stats = await fetchJSON(API_BASE + '/api/stats');
+            document.getElementById('stats-area').innerHTML = `
+                <div class="col-md-4"><div class="card bg-success text-white"><div class="card-body"><h5>📦 Всего</h5><h2>${stats.total_parts}</h2></div></div></div>
+                <div class="col-md-4"><div class="card bg-info text-white"><div class="card-body"><h5>💰 Стоимость</h5><h2>${stats.total_value.toLocaleString()} ₽</h2></div></div></div>
+                <div class="col-md-4"><div class="card bg-warning text-white"><div class="card-body"><h5>📍 Мест</h5><h2>${stats.unique_locations || 0}</h2></div></div></div>
             `;
-            document.getElementById('stats-area').innerHTML = statsHtml;
         } catch(e) { console.error(e); }
     }
 
     function filterBySearch() {
-        const searchText = document.getElementById('searchInput').value.toLowerCase();
-        if (!searchText) {
-            renderTable(allParts);
-            return;
-        }
+        const text = document.getElementById('searchInput').value.toLowerCase();
+        if (!text) { renderTable(allParts); return; }
         const filtered = allParts.filter(p => 
-            (p.name && p.name.toLowerCase().includes(searchText)) ||
-            (p.part_type && p.part_type.toLowerCase().includes(searchText)) ||
-            (p.package && p.package.toLowerCase().includes(searchText)) ||
-            (p.location && p.location.toLowerCase().includes(searchText)) ||
-            (p.status && p.status.toLowerCase().includes(searchText))
+            (p.name && p.name.toLowerCase().includes(text)) ||
+            (p.part_type && p.part_type.toLowerCase().includes(text)) ||
+            (p.package && p.package.toLowerCase().includes(text)) ||
+            (p.location && p.location.toLowerCase().includes(text)) ||
+            (p.status && p.status.toLowerCase().includes(text))
         );
         renderTable(filtered);
     }
 
-    function initEventListeners() {
+    function escapeHtml(s) { if (!s) return ''; return s.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'})[m]); }
+
+    function buildCategoryPath(catId, cats) {
+        const map = Object.fromEntries(cats.map(c => [c.id, c]));
+        const path = [];
+        let cur = map[catId];
+        while (cur) { path.unshift(cur.name); cur = map[cur.parent_id]; }
+        return path.join(' / ');
+    }
+
+    async function openEditModal(id = null) {
+        document.getElementById('partForm').reset();
+        document.getElementById('partId').value = '';
+        document.getElementById('name').value = '';
+        document.getElementById('categoryPath').value = '';
+        document.getElementById('partType').value = '';
+        document.getElementById('valueNumeric').value = '';
+        document.getElementById('valueUnit').innerHTML = '<option value="">-- единица --</option>';
+        document.getElementById('package').value = '';
+        document.getElementById('status').value = 'Новое';
+        document.getElementById('manufacturer').value = '';
+        document.getElementById('mpn').value = '';
+        document.getElementById('quantity').value = 0;
+        document.getElementById('price').value = 0;
+        document.getElementById('locPlace').value = '';
+        document.getElementById('locContainer').value = '';
+        document.getElementById('locShelf').value = '';
+        document.getElementById('locSection').value = '';
+        document.getElementById('imagePath').value = '';
+        document.getElementById('datasheetPath').value = '';
+        document.getElementById('revisionDate').value = '';
+        document.getElementById('notes').value = '';
+        if (id) {
+            try {
+                const part = await fetchJSON(API_BASE + '/api/parts/' + id);
+                document.getElementById('partId').value = part.id;
+                document.getElementById('name').value = part.name || '';
+                if (part.category_id && flatCategories.length) {
+                    const path = buildCategoryPath(part.category_id, flatCategories);
+                    document.getElementById('categoryPath').value = path;
+                    updateUnitsByCategory(path);
+                }
+                document.getElementById('partType').value = part.part_type || '';
+                if (part.value_numeric) document.getElementById('valueNumeric').value = part.value_numeric;
+                if (part.value_unit) {
+                    const sel = document.getElementById('valueUnit');
+                    let exists = false;
+                    for (let i=0; i<sel.options.length; i++) if (sel.options[i].value === part.value_unit) exists = true;
+                    if (!exists) { const opt = document.createElement('option'); opt.value = part.value_unit; opt.text = part.value_unit; sel.appendChild(opt); }
+                    sel.value = part.value_unit;
+                }
+                document.getElementById('package').value = part.package || '';
+                document.getElementById('status').value = part.status || 'Новое';
+                document.getElementById('manufacturer').value = part.manufacturer || '';
+                document.getElementById('mpn').value = part.part_number || '';
+                document.getElementById('quantity').value = part.quantity || 0;
+                document.getElementById('price').value = part.price || 0;
+                if (part.location) {
+                    const loc = part.location.split('/');
+                    if (loc[0]) document.getElementById('locPlace').value = loc[0].trim();
+                    if (loc[1]) document.getElementById('locContainer').value = loc[1].trim();
+                    if (loc[2]) document.getElementById('locShelf').value = loc[2].trim();
+                    if (loc[3]) document.getElementById('locSection').value = loc[3].trim();
+                }
+                document.getElementById('imagePath').value = part.image_path || '';
+                document.getElementById('datasheetPath').value = part.datasheet_path || '';
+                if (part.revision_date) document.getElementById('revisionDate').value = part.revision_date;
+                document.getElementById('notes').value = part.notes || '';
+            } catch(e) { alert('Ошибка загрузки детали'); return; }
+        }
+        partModalInstance.show();
+    }
+
+    async function savePart() {
+        const id = document.getElementById('partId').value;
+        let catId = null;
+        const catPath = document.getElementById('categoryPath').value;
+        if (catPath && flatCategories.length) {
+            const target = catPath.split('/').pop().trim();
+            const possible = flatCategories.filter(c => c.name === target);
+            for (let c of possible) {
+                if (buildCategoryPath(c.id, flatCategories) === catPath) { catId = c.id; break; }
+            }
+        }
+        const location = [document.getElementById('locPlace').value, document.getElementById('locContainer').value, document.getElementById('locShelf').value, document.getElementById('locSection').value].filter(v=>v.trim()).join(' / ');
+        const numeric = parseFloat(document.getElementById('valueNumeric').value);
+        const unit = document.getElementById('valueUnit').value;
+        const data = {
+            name: document.getElementById('name').value.trim(),
+            category_id: catId,
+            part_type: document.getElementById('partType').value.trim(),
+            package: document.getElementById('package').value.trim(),
+            manufacturer: document.getElementById('manufacturer').value.trim(),
+            part_number: document.getElementById('mpn').value.trim(),
+            quantity: parseInt(document.getElementById('quantity').value) || 0,
+            price: parseFloat(document.getElementById('price').value) || 0,
+            location: location,
+            status: document.getElementById('status').value,
+            image_path: document.getElementById('imagePath').value.trim(),
+            datasheet_path: document.getElementById('datasheetPath').value.trim(),
+            revision_date: document.getElementById('revisionDate').value || null,
+            notes: document.getElementById('notes').value.trim(),
+            value_numeric: isNaN(numeric) ? null : numeric,
+            value_unit: unit || null,
+            value_raw: document.getElementById('valueNumeric').value.trim() + (unit ? ' ' + unit : '')
+        };
+        if (!data.name) { alert('Наименование обязательно'); return; }
+        try {
+            let res;
+            if (id) res = await fetch(API_BASE + '/api/parts/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+            else res = await fetch(API_BASE + '/api/parts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+            if (!res.ok) throw new Error(await res.text());
+            partModalInstance.hide();
+            await loadParts();
+            await loadCategories();
+        } catch(e) { alert('Ошибка сохранения: ' + e.message); }
+    }
+
+    function openCategoryModal() {
+        const modalBody = document.getElementById('categoryTreeModal');
+        if (flatCategories.length) {
+            modalBody.innerHTML = buildTreeHTML(flatCategories);
+            attachToggleHandlers(modalBody);
+            modalBody.querySelectorAll('.category-item').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('toggle-icon')) return;
+                    const id = parseInt(el.dataset.id);
+                    const path = buildCategoryPath(id, flatCategories);
+                    document.getElementById('categoryPath').value = path;
+                    updateUnitsByCategory(path);
+                    categoryModalInstance.hide();
+                });
+            });
+        } else { modalBody.innerHTML = '<div class="p-3">Загрузка...</div>'; }
+        categoryModalInstance.show();
+    }
+
+    async function init() {
+        await loadCategories();
+        await loadParts();
+        partModalInstance = new bootstrap.Modal(document.getElementById('partModal'));
+        categoryModalInstance = new bootstrap.Modal(document.getElementById('categoryModal'));
+
+        document.getElementById('refreshBtn').addEventListener('click', async () => {
+            currentCategoryIds = [];
+            document.querySelectorAll('#categoriesTree .category-item').forEach(c => c.classList.remove('category-active'));
+            await loadParts();
+        });
+        document.getElementById('addPartBtn').addEventListener('click', () => openEditModal(null));
+        document.getElementById('selectCategoryBtn').addEventListener('click', openCategoryModal);
+        document.getElementById('assembleNameBtn').addEventListener('click', assembleName);
+        document.getElementById('savePartBtn').addEventListener('click', savePart);
         document.querySelectorAll('.filter-btn').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
+            btn.addEventListener('click', async () => {
                 document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 currentFilter = btn.dataset.filter;
@@ -263,18 +501,6 @@
             });
         });
         document.getElementById('searchInput').addEventListener('input', filterBySearch);
-        document.getElementById('refreshBtn').addEventListener('click', async () => {
-            currentCategoryIds = [];
-            document.querySelectorAll('.category-item').forEach(c => c.classList.remove('category-active'));
-            await loadCategories();
-            await loadParts();
-        });
-    }
-
-    async function init() {
-        await loadCategories();
-        await loadParts();
-        initEventListeners();
     }
     init();
 </script>

@@ -152,7 +152,6 @@ class Database:
         cursor.execute("ALTER TABLE parts ADD COLUMN value_numeric REAL")
         cursor.execute("ALTER TABLE parts ADD COLUMN value_unit TEXT")
         cursor.execute("ALTER TABLE parts ADD COLUMN value_raw TEXT")
-        # Можно добавить индексы для будущего быстрого поиска, но необязательно
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_value_unit ON parts(value_unit)")
         logger.info("✅ Добавлены поля value_numeric, value_unit, value_raw в таблицу parts")
 
@@ -204,7 +203,8 @@ class Database:
 
     def get_all_parts_filtered(self, category_id=None, filter_type="all", location_path=None) -> List[Dict[str, Any]]:
         with self.get_cursor() as cursor:
-            query = "SELECT id, name, part_type, package, quantity, price, location, status, value_numeric, value_unit, value_raw FROM parts WHERE 1=1"
+            # *** ИСПРАВЛЕНО: добавлено category_id в SELECT ***
+            query = "SELECT id, name, part_type, package, quantity, price, location, status, value_numeric, value_unit, value_raw, category_id FROM parts WHERE 1=1"
             params = []
             
             if category_id is not None:
