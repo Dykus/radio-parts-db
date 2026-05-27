@@ -2,7 +2,7 @@
 import logging
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableView, QHeaderView, QAbstractItemView
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QRegularExpression, Signal
-from PySide6.QtGui import QColor, QStandardItemModel, QStandardItem, QRegularExpressionValidator
+from PySide6.QtGui import QColor, QStandardItemModel, QStandardItem
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +27,19 @@ class PartsTableModel(QStandardItemModel):
         }
         
         for p in parts:
+            has_photo = bool(p.get('image_path') and p['image_path'].strip())
+            package_text = p.get('package') or ''
+            display_package = f"📷 {package_text}" if has_photo else package_text
+            
             items = [
-                QStandardItem(str(p['id'])), QStandardItem(p['name']),
-                QStandardItem(p['part_type'] or ''), QStandardItem(p['package'] or ''),
-                QStandardItem(str(p['quantity'])), QStandardItem(f"{p['price']:.2f}"),
-                QStandardItem(p['location'] or ''), QStandardItem(p['status'] or 'Новое')
+                QStandardItem(str(p['id'])),
+                QStandardItem(p['name']),
+                QStandardItem(p['part_type'] or ''),
+                QStandardItem(display_package),
+                QStandardItem(str(p['quantity'])),
+                QStandardItem(f"{p['price']:.2f}"),
+                QStandardItem(p['location'] or ''),
+                QStandardItem(p['status'] or 'Новое')
             ]
             
             qty = p['quantity']
@@ -92,7 +100,6 @@ class PartsTableWidget(QWidget):
         self.table_view.horizontalHeader().setSortIndicatorShown(True)
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         
-        # ✅ ВКЛЮЧАЕМ ПЕРЕТАСКИВАНИЕ КОЛОНОК
         self.table_view.horizontalHeader().setSectionsMovable(True)
         self.table_view.horizontalHeader().setDragEnabled(True)
         self.table_view.setDragDropMode(QAbstractItemView.InternalMove)
@@ -105,12 +112,10 @@ class PartsTableWidget(QWidget):
         layout.addWidget(self.table_view)
 
     def get_column_order(self):
-        """Возвращает логические индексы колонок в текущем визуальном порядке."""
         header = self.table_view.horizontalHeader()
         return [header.logicalIndex(i) for i in range(header.count())]
 
     def set_column_order(self, order):
-        """Применяет сохраненный порядок колонок."""
         if not order:
             return
         header = self.table_view.horizontalHeader()
@@ -124,7 +129,6 @@ class PartsTableWidget(QWidget):
         if not indexes:
             self.selection_changed.emit(0)
             return
-        
         row = indexes[0].row()
         part_id = int(self.proxy_model.data(self.proxy_model.index(row, 0)))
         self.selection_changed.emit(part_id)
@@ -139,7 +143,7 @@ class PartsTableWidget(QWidget):
 
     def get_selected_part_id(self):
         indexes = self.table_view.selectionModel().selectedRows()
-        if not indexes: 
+        if not indexes:
             return None
         row = indexes[0].row()
         return int(self.proxy_model.data(self.proxy_model.index(row, 0)))

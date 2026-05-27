@@ -59,9 +59,8 @@ class PartDialog(QDialog):
         nominal_layout.setContentsMargins(0, 0, 0, 0)
         nominal_layout.setSpacing(5)
         self.value_edit = QLineEdit()
-        self.value_edit.setPlaceholderText("Введите число, например: 10, 2.2, 100")
+        self.value_edit.setPlaceholderText("Введите номинал, например: 10, 2.2, 100")
         self.value_edit.textChanged.connect(self._on_value_text_changed)
-
         self.unit_combo = QComboBox()
         self.unit_combo.setEditable(False)
         self.unit_combo.setMinimumWidth(80)
@@ -76,10 +75,11 @@ class PartDialog(QDialog):
         self.btn_assemble.clicked.connect(self._assemble_name)
         layout.addRow("", self.btn_assemble)
 
-        # --- Корпус ---
+        # --- Корпус с подсказкой ---
         self.package_combo = QComboBox()
         self.package_combo.setEditable(True)
         self.package_combo.addItems(["", "0402", "0603", "0805", "1206", "SOT-23", "SOIC-8", "DIP-8", "TQFP-48", "TO-92", "TO-220"])
+        self.package_combo.setPlaceholderText("Для конденсаторов: Диаметр x Высота, например 10x17")
         layout.addRow("Корпус", self.package_combo)
 
         # --- Состояние ---
@@ -167,11 +167,18 @@ class PartDialog(QDialog):
         datasheet_layout.addWidget(self.datasheet_btn)
         layout.addRow("Даташит", datasheet_widget)
 
-        # --- Дата ревизии ---
+        # --- Дата ревизии с кнопкой "Сегодня" ---
+        revision_widget = QWidget()
+        revision_layout = QHBoxLayout(revision_widget)
+        revision_layout.setContentsMargins(0, 0, 0, 0)
         self.revision_date = QDateTimeEdit()
         self.revision_date.setDisplayFormat("dd.MM.yyyy")
         self.revision_date.setCalendarPopup(True)
-        layout.addRow("Дата ревизии", self.revision_date)
+        today_btn = QPushButton("📅 Сегодня")
+        today_btn.clicked.connect(lambda: self.revision_date.setDate(QDate.currentDate()))
+        revision_layout.addWidget(self.revision_date)
+        revision_layout.addWidget(today_btn)
+        layout.addRow("Дата ревизии", revision_widget)
 
         # --- Заметки ---
         self.notes_edit = QTextEdit()
@@ -184,96 +191,69 @@ class PartDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
-    # ---------- Динамическая смена единиц в зависимости от категории ----------
-    def _update_units_by_category(self, category_path):
-        """Обновляет выпадающий список единиц в зависимости от типа категории"""
-        # Определяем ключевые слова в пути категории
-        path_lower = category_path.lower()
-        if "конденсатор" in path_lower or "capacitor" in path_lower:
-            units = ["", "пФ", "нФ", "мкФ", "Ф"]
-        elif "резистор" in path_lower or "resistor" in path_lower:
-            units = ["", "Ом", "кОм", "МОм"]
-        elif "катушк" in path_lower or "индуктивност" in path_lower or "inductor" in path_lower:
-            units = ["", "мкГн", "мГн", "Гн"]
-        elif "транзистор" in path_lower or "transistor" in path_lower:
-            units = ["", "mA", "A", "V", "W"]  # для транзисторов: ток, напряжение, мощность
-        else:
-            # универсальный набор
-            units = ["", "Ом", "кОм", "МОм", "нФ", "мкФ", "пФ", "Ф", "Гн", "мГн", "мкГн", "В", "А", "мА"]
-        # Сохраняем текущее значение, если оно есть
-        current_unit = self.unit_combo.currentText()
-        self.unit_combo.clear()
-        self.unit_combo.addItems(units)
-        if current_unit in units:
-            self.unit_combo.setCurrentText(current_unit)
-        elif units:
-            self.unit_combo.setCurrentIndex(0)
-
-    # ---------- Парсинг номинала (только число) ----------
-    def _parse_numeric(self, raw_text: str):
-        """Извлекает число из строки (поддерживает десятичную точку)"""
+    # ---------- Парсинг номинала (убрано .0) ----------
+    def _parse_and_normalize(self, raw_text: str):
         if not raw_text:
-            return None
-        match = re.match(r"^([0-9]+(?:\.[0-9]+)?)", raw_text.strip())
-        if match:
-            return float(match.group(1))
-        return None
+            return None, "", ""
+        match = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Zμµ]?[a-zA-Z]?)$", raw_text.strip())
+        if not match:
+            try:
+                num = float(raw_text)
+                if num.is_integer():
+                    num = int(num)
+                return num, "", str(num)
+            except:
+                return None, "", ""
+        num_str, unit_raw = match.groups()
+        try:
+            numeric = float(num_str)
+            if numeric.is_integer():
+                numeric = int(numeric)
+        except:
+            return None, "", ""
+        unit_lower = unit_raw.lower()
+        unit_map = {
+            'k': 'кОм', 'm': 'МОм', 'r': 'Ом', 'ohm': 'Ом',
+            'n': 'нФ', 'u': 'мкФ', 'p': 'пФ', 'mf': 'мкФ', 'µ': 'мкФ', 'μ': 'мкФ',
+            'mhz': 'МГц', 'khz': 'кГц', 'hz': 'Гц',
+            'v': 'В', 'mv': 'мВ', 'a': 'А', 'ma': 'мА',
+            'h': 'Гн', 'mh': 'мГн'
+        }
+        unit_full = unit_map.get(unit_lower, unit_raw.upper())
+        normalized = f"{numeric} {unit_full}" if unit_full else str(numeric)
+        return numeric, unit_full, normalized
 
     def _on_value_text_changed(self, text):
-        num = self._parse_numeric(text)
+        num, unit, normalized = self._parse_and_normalize(text)
         if num is not None:
-            self.value_edit.setToolTip(f"Число: {num}")
+            if unit and self.unit_combo.findText(unit) == -1:
+                self.unit_combo.addItem(unit)
+            if unit:
+                self.unit_combo.setCurrentText(unit)
+            self.value_edit.setToolTip(f"Распознано: {normalized}")
         else:
-            self.value_edit.setToolTip("Введите число (можно с точкой), например 10, 2.2, 100")
+            self.value_edit.setToolTip("Не удалось распознать номинал. Примеры: 10, 2.2, 100")
 
     # ---------- Собрать название ----------
     def _assemble_name(self):
         category_path = self.category_edit.text().strip()
-        # Извлекаем последний сегмент категории (обычно это напряжение или тип)
-        parts = category_path.split('/')
-        last_part = parts[-1].strip() if parts else ""
-        # Если последний сегмент похож на напряжение (содержит V), используем его
-        voltage = last_part if re.search(r'\d+V', last_part, re.IGNORECASE) else ""
-
-        # Номинал (число)
+        category_name = category_path.split('/')[-1].strip() if category_path else ""
         value_raw = self.value_edit.text().strip()
-        numeric = self._parse_numeric(value_raw)
-        # Единица измерения из выпадающего списка
-        unit = self.unit_combo.currentText()
-        value_part = f"{numeric}{unit}" if numeric is not None and unit else (value_raw if value_raw else "")
-
-        # Корпус
+        _, unit, normalized = self._parse_and_normalize(value_raw)
+        value_part = normalized if normalized else value_raw
         package = self.package_combo.currentText().strip()
-
-        # Собираем имя
-        name_parts = []
-        if value_part:
-            name_parts.append(value_part)
-        if voltage:
-            name_parts.append(voltage)
-        if package:
-            name_parts.append(package)
-
-        assembled = " ".join(name_parts)
+        parts = [p for p in (category_name, value_part, package) if p]
+        assembled = " ".join(parts)
         if assembled:
             self.name_edit.setText(assembled)
         else:
-            QMessageBox.information(self, "Невозможно собрать", "Заполните хотя бы номинал или выберите категорию с напряжением.")
+            QMessageBox.information(self, "Невозможно собрать", "Заполните хотя бы категорию, номинал или корпус.")
 
-    # ---------- Обработка смены категории ----------
-    def _on_category_changed(self, category_path):
-        """Вызывается, когда пользователь выбрал новую категорию"""
-        self._update_units_by_category(category_path)
-
-    # ---------- Остальные вспомогательные методы ----------
+    # ---------- Вспомогательные методы ----------
     def _open_category_selector(self):
         dialog = CategorySelectorDialog(self, db=self.db, selected_category=self.category_edit.text(), start_depth=self.start_depth)
-        dialog.category_selected.connect(self._on_category_selected)
+        dialog.category_selected.connect(self.category_edit.setText)
         dialog.exec()
-
-    def _on_category_selected(self, category_path):
-        self.category_edit.setText(category_path)
-        self._on_category_changed(category_path)
 
     def _browse_file(self, line_edit, filter_str):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите файл", "", filter_str)
@@ -373,9 +353,7 @@ class PartDialog(QDialog):
         cat_id = data.get('category_id')
         if cat_id:
             cats = self.db.get_categories()
-            path = self._build_category_path(cat_id, cats)
-            self.category_edit.setText(path)
-            self._on_category_changed(path)  # обновить единицы
+            self.category_edit.setText(self._build_category_path(cat_id, cats))
         else:
             self.category_edit.setText("")
         self.part_type_edit.setText(data.get('part_type', ''))
@@ -391,12 +369,23 @@ class PartDialog(QDialog):
         if value_raw:
             self.value_edit.setText(value_raw)
         elif value_numeric is not None and value_unit:
-            self.value_edit.setText(str(value_numeric))
+            # Форматируем без .0 для целых
+            if isinstance(value_numeric, float) and value_numeric.is_integer():
+                self.value_edit.setText(str(int(value_numeric)))
+            else:
+                self.value_edit.setText(str(value_numeric))
+        elif value_numeric is not None:
+            if isinstance(value_numeric, float) and value_numeric.is_integer():
+                self.value_edit.setText(str(int(value_numeric)))
+            else:
+                self.value_edit.setText(str(value_numeric))
+        if value_unit:
             idx = self.unit_combo.findText(value_unit)
             if idx >= 0:
                 self.unit_combo.setCurrentIndex(idx)
-        elif value_numeric is not None:
-            self.value_edit.setText(str(value_numeric))
+            else:
+                self.unit_combo.addItem(value_unit)
+                self.unit_combo.setCurrentText(value_unit)
 
         status_val = data.get('status', 'Новое')
         for i in range(self.status_combo.count()):
@@ -448,10 +437,16 @@ class PartDialog(QDialog):
         status_value = full_status.split(' ', 1)[-1] if ' ' in full_status else full_status
         category_path = self.category_edit.text().strip()
         category_id = self._get_category_id_from_path(category_path) if category_path else None
-
-        value_raw = self.value_edit.text().strip()
-        numeric = self._parse_numeric(value_raw)
-        unit = self.unit_combo.currentText()
+        raw_value = self.value_edit.text().strip()
+        numeric, unit, normalized = self._parse_and_normalize(raw_value)
+        if numeric is None and self.unit_combo.currentText():
+            match = re.search(r"([0-9]+(?:\.[0-9]+)?)", raw_value)
+            if match:
+                numeric = float(match.group(1))
+                if numeric.is_integer():
+                    numeric = int(numeric)
+                unit = self.unit_combo.currentText()
+        value_raw = raw_value if raw_value else None
 
         return {
             'name': self.name_edit.text().strip(),
@@ -470,5 +465,5 @@ class PartDialog(QDialog):
             'notes': self.notes_edit.toPlainText().strip(),
             'value_numeric': numeric,
             'value_unit': unit if unit else None,
-            'value_raw': value_raw if value_raw else None
+            'value_raw': value_raw
         }

@@ -157,7 +157,6 @@ class Database:
 
     # ==================== КАТЕГОРИИ ====================
     def _get_all_descendant_ids(self, cat_id: int, cursor) -> List[int]:
-        """Рекурсивно получает ID всех дочерних категорий."""
         descendants = [cat_id]
         cursor.execute("SELECT id FROM categories WHERE parent_id = ?", (cat_id,))
         for child in cursor.fetchall():
@@ -165,7 +164,6 @@ class Database:
         return descendants
 
     def get_category_part_count_recursive(self, cat_id: int) -> int:
-        """Рекурсивно считает детали в категории и всех её подкатегориях."""
         with self.get_cursor() as cursor:
             descendant_ids = self._get_all_descendant_ids(cat_id, cursor)
             placeholders = ','.join('?' for _ in descendant_ids)
@@ -203,8 +201,8 @@ class Database:
 
     def get_all_parts_filtered(self, category_id=None, filter_type="all", location_path=None) -> List[Dict[str, Any]]:
         with self.get_cursor() as cursor:
-            # *** ИСПРАВЛЕНО: добавлено category_id в SELECT ***
-            query = "SELECT id, name, part_type, package, quantity, price, location, status, value_numeric, value_unit, value_raw, category_id FROM parts WHERE 1=1"
+            # *** ДОБАВЛЕНО image_path ***
+            query = "SELECT id, name, part_type, package, quantity, price, location, status, value_numeric, value_unit, value_raw, category_id, image_path FROM parts WHERE 1=1"
             params = []
             
             if category_id is not None:
