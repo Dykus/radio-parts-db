@@ -4,15 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RadioPartsDB Web SPA (beta)</title>
-    <!-- Bootstrap для красоты -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #f8f9fa; }
-        /* стили для количества */
         .qty-high { background-color: #d1e7dd; color: #0f5132; }
         .qty-low { background-color: #fff3cd; color: #664d03; }
         .qty-out { background-color: #f8d7da; color: #842029; }
-        /* дерево категорий */
         .category-tree {
             max-height: 70vh;
             overflow-y: auto;
@@ -48,7 +45,6 @@
 
 <div class="container">
     <div class="row">
-        <!-- Левая панель: категории -->
         <div class="col-md-3">
             <div class="card">
                 <div class="card-header bg-primary text-white">📂 Категории</div>
@@ -60,58 +56,30 @@
             </div>
         </div>
 
-        <!-- Правая часть: таблица и фильтры -->
         <div class="col-md-9">
-            <!-- Статистика -->
             <div class="row mb-3" id="stats-area">
-                <div class="col">
-                    <div class="card">
-                        <div class="card-body">
-                            <h5 class="card-title">Загрузка статистики...</h5>
-                        </div>
-                    </div>
-                </div>
+                <div class="col"><div class="card"><div class="card-body">Загрузка статистики...</div></div></div>
             </div>
 
-            <!-- Панель фильтров -->
             <div class="card mb-3">
                 <div class="card-body">
                     <div class="row g-2">
-                        <div class="col-auto">
-                            <button class="btn btn-outline-primary filter-btn active" data-filter="all">📋 Все</button>
-                        </div>
-                        <div class="col-auto">
-                            <button class="btn btn-outline-success filter-btn" data-filter="in_stock">✅ В наличии</button>
-                        </div>
-                        <div class="col-auto">
-                            <button class="btn btn-outline-warning filter-btn" data-filter="low_stock">⚠️ Мало</button>
-                        </div>
-                        <div class="col-auto">
-                            <button class="btn btn-outline-danger filter-btn" data-filter="out_of_stock">❌ Нет</button>
-                        </div>
-                        <div class="col">
-                            <input type="text" class="form-control" id="searchInput" placeholder="🔍 Поиск по таблице...">
-                        </div>
+                        <div class="col-auto"><button class="btn btn-outline-primary filter-btn active" data-filter="all">📋 Все</button></div>
+                        <div class="col-auto"><button class="btn btn-outline-success filter-btn" data-filter="in_stock">✅ В наличии</button></div>
+                        <div class="col-auto"><button class="btn btn-outline-warning filter-btn" data-filter="low_stock">⚠️ Мало</button></div>
+                        <div class="col-auto"><button class="btn btn-outline-danger filter-btn" data-filter="out_of_stock">❌ Нет</button></div>
+                        <div class="col"><input type="text" class="form-control" id="searchInput" placeholder="🔍 Поиск по таблице..."></div>
                     </div>
                 </div>
             </div>
 
-            <!-- Таблица деталей -->
             <div class="card">
                 <div class="card-header bg-primary text-white">Список деталей</div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-hover mb-0 align-middle" id="parts-table">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>ID</th><th>Наименование</th><th>Тип</th><th>Корпус</th>
-                                    <th class="text-center">Кол-во</th><th class="text-end">Цена</th>
-                                    <th>Место</th><th>Статус</th>
-                                </tr>
-                            </thead>
-                            <tbody id="table-body">
-                                <tr><td colspan="8" class="text-center py-4">⏳ Загрузка данных...</td></tr>
-                            </tbody>
+                        <table class="table table-hover mb-0 align-middle">
+                            <thead class="table-light"><tr><th>ID</th><th>Наименование</th><th>Тип</th><th>Корпус</th><th class="text-center">Кол-во</th><th class="text-end">Цена</th><th>Место</th><th>Статус</th></tr></thead>
+                            <tbody id="table-body"><tr><td colspan="8" class="text-center py-4">⏳ Загрузка...</td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -121,44 +89,53 @@
 </div>
 
 <script>
-    // ---------- НАСТРОЙКИ ----------
     const API_BASE = 'http://localhost:8000';
-    let currentCategoryId = null;   // выбранная категория (null = все)
-    let currentFilter = 'all';       // all, in_stock, low_stock, out_of_stock
-    let allParts = [];               // все загруженные детали (для поиска и фильтрации)
+    let currentCategoryIds = [];   // список ID выбранной категории + всех её потомков
+    let currentFilter = 'all';
+    let allParts = [];
+    let flatCategories = [];        // плоский список всех категорий
 
-    // ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
+    // ---------- вспомогательные функции ----------
     async function fetchJSON(url) {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
     }
 
-    // Загрузка категорий и построение дерева
+    // рекурсивный сбор ID всех подкатегорий
+    function getAllDescendantIds(catId, categoriesFlat) {
+        const result = [catId];
+        const children = categoriesFlat.filter(c => c.parent_id === catId);
+        for (const child of children) {
+            result.push(...getAllDescendantIds(child.id, categoriesFlat));
+        }
+        return result;
+    }
+
+    // загрузка категорий и построение дерева
     async function loadCategories() {
         try {
-            const categories = await fetchJSON(`${API_BASE}/api/categories`); // список [{id, name, parent_id}]
+            flatCategories = await fetchJSON(`${API_BASE}/api/categories`);
             const container = document.getElementById('categoriesTree');
-            if (!categories.length) {
+            if (!flatCategories.length) {
                 container.innerHTML = '<div class="p-3">Нет категорий</div>';
                 return;
             }
-            // Построим дерево в памяти
+            // построим дерево
             const tree = {};
             const map = {};
-            categories.forEach(cat => {
+            flatCategories.forEach(cat => {
                 map[cat.id] = { id: cat.id, name: cat.name, parent_id: cat.parent_id, children: [] };
             });
-            categories.forEach(cat => {
+            flatCategories.forEach(cat => {
                 if (cat.parent_id === null || cat.parent_id === 0) {
                     tree[cat.id] = map[cat.id];
                 } else {
                     if (map[cat.parent_id]) map[cat.parent_id].children.push(map[cat.id]);
                 }
             });
-            // Рендер дерева
             function renderTree(node, level = 0) {
-                let html = `<div style="margin-left: ${level*20}px" class="category-item" data-id="${node.id}">${node.name}</div>`;
+                let html = `<div style="margin-left: ${level*20}px" class="category-item" data-id="${node.id}">${escapeHtml(node.name)}</div>`;
                 if (node.children.length) {
                     html += `<div class="category-children">${node.children.map(child => renderTree(child, level+1)).join('')}</div>`;
                 }
@@ -169,56 +146,49 @@
                 treeHtml += renderTree(tree[id]);
             }
             container.innerHTML = treeHtml;
-            // Добавляем обработчики кликов по категориям
+
+            // обработчики кликов
             document.querySelectorAll('.category-item').forEach(el => {
-                el.addEventListener('click', (e) => {
+                el.addEventListener('click', async (e) => {
                     e.stopPropagation();
                     const catId = parseInt(el.dataset.id);
-                    currentCategoryId = catId;
-                    // визуально выделяем активную категорию
+                    // получаем все дочерние ID
+                    currentCategoryIds = getAllDescendantIds(catId, flatCategories);
+                    // визуальное выделение
                     document.querySelectorAll('.category-item').forEach(c => c.classList.remove('category-active'));
                     el.classList.add('category-active');
-                    // перезагружаем таблицу с новым фильтром по категории
-                    loadParts();
+                    // перезагружаем таблицу
+                    await loadParts();
                 });
             });
-            // Сбросить выделение при клике вне (опционально)
         } catch (e) {
-            console.error('Ошибка загрузки категорий', e);
+            console.error(e);
             document.getElementById('categoriesTree').innerHTML = '<div class="text-danger p-3">Ошибка загрузки категорий</div>';
         }
     }
 
-    // Загрузка деталей с учётом категории и фильтра, сохранение в allParts
     async function loadParts() {
         try {
-            let url = `${API_BASE}/api/parts?limit=1000`; // берём много
-            const parts = await fetchJSON(url);
-            // Фильтрация по категории (если выбрана)
+            const parts = await fetchJSON(`${API_BASE}/api/parts?limit=2000`);
             let filtered = parts;
-            if (currentCategoryId !== null) {
-                // Здесь надо бы рекурсивно подкатегории, но для простоты пока только точное совпадение
-                // Позже можно доработать, запросив с бэка фильтрацию по категории
-                // Временно: сделаем отдельный эндпоинт? Но у нас в API /api/parts не поддерживает category_id.
-                // Можно расширить API, но проще пока фильтровать на фронте по category_id.
-                // Однако parts из /api/parts не содержат category_id? Проверим. В наших данных есть.
-                filtered = parts.filter(p => p.category_id === currentCategoryId);
+            // фильтр по категориям (если выбрана)
+            if (currentCategoryIds.length > 0) {
+                filtered = filtered.filter(p => currentCategoryIds.includes(p.category_id));
             }
-            // Фильтр по наличию
+            // фильтр по наличию
             if (currentFilter === 'in_stock') filtered = filtered.filter(p => p.quantity > 0);
             else if (currentFilter === 'low_stock') filtered = filtered.filter(p => p.quantity > 0 && p.quantity < 10);
             else if (currentFilter === 'out_of_stock') filtered = filtered.filter(p => p.quantity === 0);
             
-            allParts = filtered; // сохраняем для поиска
+            allParts = filtered;
             renderTable(allParts);
-            loadStats(); // обновляем статистику
+            await loadStats();
         } catch (e) {
             console.error(e);
             document.getElementById('table-body').innerHTML = '<tr><td colspan="8" class="text-danger">Ошибка загрузки деталей</td></tr>';
         }
     }
 
-    // Отрисовка таблицы
     function renderTable(parts) {
         const tbody = document.getElementById('table-body');
         if (!parts.length) {
@@ -226,7 +196,7 @@
             return;
         }
         let html = '';
-        parts.forEach(p => {
+        for (const p of parts) {
             let rowClass = '';
             if (p.quantity > 10) rowClass = 'qty-high';
             else if (p.quantity > 0) rowClass = 'qty-low';
@@ -241,11 +211,10 @@
                 <td>${escapeHtml(p.location) || '-'}</td>
                 <td>${escapeHtml(p.status) || 'Новое'}</td>
             </tr>`;
-        });
+        }
         tbody.innerHTML = html;
     }
 
-    // Защита от XSS
     function escapeHtml(str) {
         if (!str) return '';
         return str.replace(/[&<>]/g, function(m) {
@@ -256,32 +225,18 @@
         });
     }
 
-    // Загрузка статистики
     async function loadStats() {
         try {
             const stats = await fetchJSON(`${API_BASE}/api/stats`);
             const statsHtml = `
-                <div class="col-md-4">
-                    <div class="card text-white bg-success">
-                        <div class="card-body"><h5 class="card-title">📦 Всего деталей</h5><h2>${stats.total_parts}</h2></div>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="card text-white bg-info">
-                        <div class="card-body"><h5 class="card-title">💰 Общая стоимость</h5><h2>${stats.total_value.toLocaleString()} ₽</h2></div>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="card text-white bg-warning">
-                        <div class="card-body"><h5 class="card-title">📍 Уникальных мест</h5><h2>${stats.unique_locations || 0}</h2></div>
-                    </div>
-                </div>
+                <div class="col-md-4"><div class="card text-white bg-success"><div class="card-body"><h5 class="card-title">📦 Всего деталей</h5><h2>${stats.total_parts}</h2></div></div></div>
+                <div class="col-md-4"><div class="card text-white bg-info"><div class="card-body"><h5 class="card-title">💰 Общая стоимость</h5><h2>${stats.total_value.toLocaleString()} ₽</h2></div></div></div>
+                <div class="col-md-4"><div class="card text-white bg-warning"><div class="card-body"><h5 class="card-title">📍 Уникальных мест</h5><h2>${stats.unique_locations || 0}</h2></div></div></div>
             `;
             document.getElementById('stats-area').innerHTML = statsHtml;
         } catch(e) { console.error(e); }
     }
 
-    // Поиск по таблице (фильтрует allParts по тексту)
     function filterBySearch() {
         const searchText = document.getElementById('searchInput').value.toLowerCase();
         if (!searchText) {
@@ -298,29 +253,24 @@
         renderTable(filtered);
     }
 
-    // Инициализация событий
     function initEventListeners() {
-        // Фильтры
         document.querySelectorAll('.filter-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 currentFilter = btn.dataset.filter;
-                loadParts(); // перезагружаем всё с новым фильтром (и категория тоже учитывается)
+                await loadParts();
             });
         });
-        // Поиск
         document.getElementById('searchInput').addEventListener('input', filterBySearch);
-        // Кнопка обновить
-        document.getElementById('refreshBtn').addEventListener('click', () => {
-            currentCategoryId = null;
+        document.getElementById('refreshBtn').addEventListener('click', async () => {
+            currentCategoryIds = [];
             document.querySelectorAll('.category-item').forEach(c => c.classList.remove('category-active'));
-            loadParts();
-            loadCategories(); // обновить и категории на всякий случай
+            await loadCategories();
+            await loadParts();
         });
     }
 
-    // Старт
     async function init() {
         await loadCategories();
         await loadParts();

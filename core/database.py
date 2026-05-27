@@ -19,7 +19,7 @@ from typing import Optional, List, Dict, Any
 # Подробности: см. файл SCHEMA_CHANGES.md в корне проекта.
 # ==============================================================================
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 logger = logging.getLogger(__name__)
 
 class Database:
@@ -29,6 +29,7 @@ class Database:
         self._migrations = {
             1: self._migration_v1_initial,
             2: self._migration_v2_russian_statuses,
+            3: self._migration_v3_add_nominal_fields,
         }
 
     def connect(self):
@@ -146,6 +147,15 @@ class Database:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_location ON parts(location)")
         cursor.execute("PRAGMA foreign_keys = ON")
 
+    def _migration_v3_add_nominal_fields(self, cursor):
+        """Добавляем поля для нормализованного номинала (задача 0.21.0)"""
+        cursor.execute("ALTER TABLE parts ADD COLUMN value_numeric REAL")
+        cursor.execute("ALTER TABLE parts ADD COLUMN value_unit TEXT")
+        cursor.execute("ALTER TABLE parts ADD COLUMN value_raw TEXT")
+        # Можно добавить индексы для будущего быстрого поиска, но необязательно
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_value_unit ON parts(value_unit)")
+        logger.info("✅ Добавлены поля value_numeric, value_unit, value_raw в таблицу parts")
+
     # ==================== КАТЕГОРИИ ====================
     def _get_all_descendant_ids(self, cat_id: int, cursor) -> List[int]:
         """Рекурсивно получает ID всех дочерних категорий."""
@@ -194,7 +204,7 @@ class Database:
 
     def get_all_parts_filtered(self, category_id=None, filter_type="all", location_path=None) -> List[Dict[str, Any]]:
         with self.get_cursor() as cursor:
-            query = "SELECT id, name, part_type, package, quantity, price, location, status FROM parts WHERE 1=1"
+            query = "SELECT id, name, part_type, package, quantity, price, location, status, value_numeric, value_unit, value_raw FROM parts WHERE 1=1"
             params = []
             
             if category_id is not None:
@@ -235,12 +245,23 @@ class Database:
             total_value = cursor.fetchone()[0] or 0.0
             cursor.execute("SELECT COUNT(*) FROM parts WHERE quantity = 0")
             out_of_stock = cursor.fetchone()[0]
-            return {'total_parts': total_parts, 'total_quantity': total_quantity, 'total_value': round(total_value, 2), 'out_of_stock': out_of_stock}
+            cursor.execute("SELECT COUNT(DISTINCT location) FROM parts WHERE location IS NOT NULL AND location != ''")
+            unique_locations = cursor.fetchone()[0] or 0
+            return {'total_parts': total_parts, 'total_quantity': total_quantity, 'total_value': round(total_value, 2), 'out_of_stock': out_of_stock, 'unique_locations': unique_locations}
 
     def create_part(self, data: Dict[str, Any]) -> int:
         with self.get_cursor() as cursor:
-            cursor.execute("""INSERT INTO parts (name, category_id, part_type, package, manufacturer, part_number, quantity, price, location, status, image_path, datasheet_path, notes, revision_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
-                (data['name'], data.get('category_id'), data.get('part_type'), data.get('package'), data.get('manufacturer'), data.get('part_number'), data.get('quantity', 0), data.get('price', 0), data.get('location'), data.get('status', 'Новое'), data.get('image_path'), data.get('datasheet_path'), data.get('notes'), data.get('revision_date')))
+            cursor.execute("""INSERT INTO parts (
+                name, category_id, part_type, package, manufacturer, part_number,
+                quantity, price, location, status, image_path, datasheet_path, notes, revision_date,
+                value_numeric, value_unit, value_raw
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
+                (data['name'], data.get('category_id'), data.get('part_type'), data.get('package'),
+                 data.get('manufacturer'), data.get('part_number'), data.get('quantity', 0),
+                 data.get('price', 0), data.get('location'), data.get('status', 'Новое'),
+                 data.get('image_path'), data.get('datasheet_path'), data.get('notes'),
+                 data.get('revision_date'), data.get('value_numeric'), data.get('value_unit'),
+                 data.get('value_raw')))
             return cursor.lastrowid
 
     def create_category(self, name: str, parent_id=None, description="") -> int:
@@ -253,16 +274,19 @@ class Database:
     def update_part(self, part_id: int, data: Dict[str, Any]):
         with self.get_cursor() as cursor: 
             cursor.execute("""
-                UPDATE parts SET name=?, category_id=?, part_type=?, package=?, manufacturer=?, part_number=?,
-                                 quantity=?, price=?, location=?, status=?, image_path=?, 
-                                 datasheet_path=?, notes=?, revision_date=?, updated_at=CURRENT_TIMESTAMP
+                UPDATE parts SET
+                    name=?, category_id=?, part_type=?, package=?, manufacturer=?, part_number=?,
+                    quantity=?, price=?, location=?, status=?, image_path=?, 
+                    datasheet_path=?, notes=?, revision_date=?, updated_at=CURRENT_TIMESTAMP,
+                    value_numeric=?, value_unit=?, value_raw=?
                 WHERE id=?
             """, (
                 data['name'], data.get('category_id'), data.get('part_type'),
                 data.get('package'), data.get('manufacturer'), data.get('part_number'),
                 data.get('quantity', 0), data.get('price', 0), data.get('location'),
                 data.get('status', 'Новое'), data.get('image_path'),
-                data.get('datasheet_path'), data.get('notes'), data.get('revision_date'), part_id
+                data.get('datasheet_path'), data.get('notes'), data.get('revision_date'),
+                data.get('value_numeric'), data.get('value_unit'), data.get('value_raw'), part_id
             ))
 
     def delete_part(self, part_id: int, reason: str = "deleted_by_user"):
