@@ -10,15 +10,6 @@ from typing import Optional, List, Dict, Any
 # ==============================================================================
 # ⚠️ ВАЖНО: ИЗМЕНЕНИЕ СТРУКТУРЫ БАЗЫ ДАННЫХ
 # ==============================================================================
-# НИКОГДА не меняйте SQL-запросы в init_schema() или в методах CRUD напрямую!
-# Для любого изменения схемы (новая колонка, переименование, типы данных):
-#   1. Поднимите CURRENT_SCHEMA_VERSION в классе Database (__init__)
-#   2. Добавьте функцию миграции в self._migrations[НОВАЯ_ВЕРСИЯ] = ...
-#   3. Напишите логику изменения в отдельном методе _migration_vX_описание()
-# Программа сама применит изменения при запуске. Данные не пострадают.
-# Подробности: см. файл SCHEMA_CHANGES.md в корне проекта.
-# ==============================================================================
-
 CURRENT_SCHEMA_VERSION = 3
 logger = logging.getLogger(__name__)
 
@@ -148,7 +139,6 @@ class Database:
         cursor.execute("PRAGMA foreign_keys = ON")
 
     def _migration_v3_add_nominal_fields(self, cursor):
-        """Добавляем поля для нормализованного номинала (задача 0.21.0)"""
         cursor.execute("ALTER TABLE parts ADD COLUMN value_numeric REAL")
         cursor.execute("ALTER TABLE parts ADD COLUMN value_unit TEXT")
         cursor.execute("ALTER TABLE parts ADD COLUMN value_raw TEXT")
@@ -201,7 +191,6 @@ class Database:
 
     def get_all_parts_filtered(self, category_id=None, filter_type="all", location_path=None) -> List[Dict[str, Any]]:
         with self.get_cursor() as cursor:
-            # *** ДОБАВЛЕНО image_path ***
             query = "SELECT id, name, part_type, package, quantity, price, location, status, value_numeric, value_unit, value_raw, category_id, image_path FROM parts WHERE 1=1"
             params = []
             
@@ -228,10 +217,41 @@ class Database:
             cursor.execute("SELECT id, name, parent_id FROM categories ORDER BY name")
             return cursor.fetchall()
 
+    # ==================== СПРАВОЧНИКИ ====================
     def get_dictionary_values(self, dict_type: str) -> List[str]:
+        """Возвращает значения из таблицы dictionaries для указанного типа."""
         with self.get_cursor() as cursor:
-            cursor.execute("SELECT value FROM dictionaries WHERE type = ?", (dict_type,))
+            cursor.execute("SELECT value FROM dictionaries WHERE type = ? ORDER BY value", (dict_type,))
             return [row[0] for row in cursor.fetchall()]
+
+    def add_dictionary_value(self, dict_type: str, value: str) -> bool:
+        """Добавляет новое значение в словарь, если его ещё нет. Возвращает True, если добавлено."""
+        if not value or not value.strip():
+            return False
+        with self.get_cursor() as cursor:
+            try:
+                cursor.execute("INSERT OR IGNORE INTO dictionaries (type, value) VALUES (?, ?)", (dict_type, value.strip()))
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"Ошибка добавления в словарь {dict_type}: {e}")
+                return False
+
+    def get_combined_dictionary_values(self, dict_type: str, field_name: str) -> List[str]:
+        """
+        Возвращает объединённый список уникальных значений:
+        - из таблицы dictionaries (тип dict_type)
+        - из поля field_name таблицы parts (не NULL и не пустые)
+        """
+        values = set()
+        # Из справочника
+        values.update(self.get_dictionary_values(dict_type))
+        # Из существующих деталей
+        with self.get_cursor() as cursor:
+            cursor.execute(f"SELECT DISTINCT {field_name} FROM parts WHERE {field_name} IS NOT NULL AND trim({field_name}) != ''")
+            for row in cursor.fetchall():
+                if row[0]:
+                    values.add(row[0])
+        return sorted(values)
 
     def get_stats(self) -> Dict[str, Any]:
         with self.get_cursor() as cursor:

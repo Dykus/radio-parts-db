@@ -48,10 +48,11 @@ class PartDialog(QDialog):
         category_layout.addWidget(self.btn_select_category)
         layout.addRow("Категория", category_widget)
 
-        # --- Тип детали ---
-        self.part_type_edit = QLineEdit()
-        self.part_type_edit.setPlaceholderText("Например: Резистор, Конденсатор, Транзистор...")
-        layout.addRow("Тип детали", self.part_type_edit)
+        # --- Тип детали (ComboBox с возможностью добавления) ---
+        self.part_type_combo = QComboBox()
+        self.part_type_combo.setEditable(True)
+        self.part_type_combo.setPlaceholderText("Введите или выберите тип")
+        layout.addRow("Тип детали", self.part_type_combo)
 
         # --- Номинал / значение ---
         nominal_widget = QWidget()
@@ -92,9 +93,11 @@ class PartDialog(QDialog):
         self.status_combo.setCurrentText("🛒 Новое")
         layout.addRow("Состояние", self.status_combo)
 
-        # --- Производитель ---
-        self.manufacturer_edit = QLineEdit()
-        layout.addRow("Производитель", self.manufacturer_edit)
+        # --- Производитель (ComboBox с возможностью добавления) ---
+        self.manufacturer_combo = QComboBox()
+        self.manufacturer_combo.setEditable(True)
+        self.manufacturer_combo.setPlaceholderText("Введите или выберите производителя")
+        layout.addRow("Производитель", self.manufacturer_combo)
 
         # --- Артикул (MPN) ---
         self.part_number_edit = QLineEdit()
@@ -190,6 +193,35 @@ class PartDialog(QDialog):
         buttons.accepted.connect(self.validate_and_accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
+
+        # --- Загрузка данных в комбобоксы ---
+        self._refresh_part_type_list()
+        self._refresh_manufacturer_list()
+
+    # ---------- Загрузка списков для комбобоксов ----------
+    def _refresh_part_type_list(self):
+        """Обновляет список типов деталей из БД."""
+        values = self.db.get_combined_dictionary_values('part_type', 'part_type')
+        current = self.part_type_combo.currentText()
+        self.part_type_combo.clear()
+        self.part_type_combo.addItems(values)
+        if current and current in values:
+            self.part_type_combo.setCurrentText(current)
+        elif current:
+            self.part_type_combo.setCurrentText(current)
+            self.part_type_combo.addItem(current)  # временно добавить, если нет в списке
+
+    def _refresh_manufacturer_list(self):
+        """Обновляет список производителей из БД."""
+        values = self.db.get_combined_dictionary_values('manufacturer', 'manufacturer')
+        current = self.manufacturer_combo.currentText()
+        self.manufacturer_combo.clear()
+        self.manufacturer_combo.addItems(values)
+        if current and current in values:
+            self.manufacturer_combo.setCurrentText(current)
+        elif current:
+            self.manufacturer_combo.setCurrentText(current)
+            self.manufacturer_combo.addItem(current)
 
     # ---------- Парсинг номинала (убрано .0) ----------
     def _parse_and_normalize(self, raw_text: str):
@@ -356,9 +388,20 @@ class PartDialog(QDialog):
             self.category_edit.setText(self._build_category_path(cat_id, cats))
         else:
             self.category_edit.setText("")
-        self.part_type_edit.setText(data.get('part_type', ''))
+        
+        # Тип детали
+        part_type = data.get('part_type', '')
+        self.part_type_combo.setCurrentText(part_type)
+        if part_type and self.part_type_combo.findText(part_type) == -1:
+            self.part_type_combo.addItem(part_type)
+        
+        # Производитель
+        manufacturer = data.get('manufacturer', '')
+        self.manufacturer_combo.setCurrentText(manufacturer)
+        if manufacturer and self.manufacturer_combo.findText(manufacturer) == -1:
+            self.manufacturer_combo.addItem(manufacturer)
+        
         self.package_combo.setCurrentText(data.get('package', ''))
-        self.manufacturer_edit.setText(data.get('manufacturer', ''))
         self.part_number_edit.setText(data.get('part_number', ''))
         self.quantity_spin.setValue(data.get('quantity', 0))
         self.price_spin.setValue(data.get('price', 0))
@@ -369,7 +412,6 @@ class PartDialog(QDialog):
         if value_raw:
             self.value_edit.setText(value_raw)
         elif value_numeric is not None and value_unit:
-            # Форматируем без .0 для целых
             if isinstance(value_numeric, float) and value_numeric.is_integer():
                 self.value_edit.setText(str(int(value_numeric)))
             else:
@@ -422,6 +464,13 @@ class PartDialog(QDialog):
         if not self.name_edit.text().strip():
             QMessageBox.warning(self, "Ошибка", "⚠️ Наименование обязательно!")
             return
+        # Добавляем новые значения в словари (если они не пустые)
+        part_type = self.part_type_combo.currentText().strip()
+        if part_type:
+            self.db.add_dictionary_value('part_type', part_type)
+        manufacturer = self.manufacturer_combo.currentText().strip()
+        if manufacturer:
+            self.db.add_dictionary_value('manufacturer', manufacturer)
         self.accept()
 
     def get_location_string(self):
@@ -451,9 +500,9 @@ class PartDialog(QDialog):
         return {
             'name': self.name_edit.text().strip(),
             'category_id': category_id,
-            'part_type': self.part_type_edit.text().strip(),
-            'package': self.package_combo.currentText(),
-            'manufacturer': self.manufacturer_edit.text().strip(),
+            'part_type': self.part_type_combo.currentText().strip(),
+            'package': self.package_combo.currentText().strip(),
+            'manufacturer': self.manufacturer_combo.currentText().strip(),
             'part_number': self.part_number_edit.text().strip(),
             'quantity': self.quantity_spin.value(),
             'price': self.price_spin.value(),
