@@ -106,6 +106,7 @@ class PartsFilterProxyModel(QSortFilterProxyModel):
 
 class PartsTableWidget(QWidget):
     selection_changed = Signal(int)
+    selection_changed_batch = Signal(int)
     double_clicked = Signal(int)
 
     def __init__(self, db, parent=None):
@@ -124,22 +125,47 @@ class PartsTableWidget(QWidget):
         self.table_view = QTableView()
         self.table_view.setModel(self.proxy_model)
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        
+
+        # Принудительное выделение строк (перебивает любые цвета модели)
+        self.table_view.setStyleSheet("""
+            QTableView::item:selected {
+                background-color: #3399ff !important;
+                color: white !important;
+            }
+            QTableView::item:selected:!active {
+                background-color: #3399ff !important;
+                color: white !important;
+            }
+        """)
+
         self.table_view.setSortingEnabled(True)
         self.table_view.horizontalHeader().setSortIndicatorShown(True)
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        
         self.table_view.horizontalHeader().setSectionsMovable(True)
         self.table_view.horizontalHeader().setDragEnabled(True)
         self.table_view.setDragDropMode(QAbstractItemView.InternalMove)
-        
         self.table_view.hideColumn(0)
 
-        self.table_view.selectionModel().selectionChanged.connect(self._on_selection)
+        self.table_view.selectionModel().selectionChanged.connect(self._on_selection_changed)
         self.table_view.doubleClicked.connect(self._on_double_click)
 
         layout.addWidget(self.table_view)
+
+    def _on_selection_changed(self, selected, deselected):
+        rows = self.table_view.selectionModel().selectedRows()
+        if rows:
+            part_id = int(self.proxy_model.data(self.proxy_model.index(rows[0].row(), 0)))
+            self.selection_changed.emit(part_id)
+        else:
+            self.selection_changed.emit(0)
+        self.selection_changed_batch.emit(len(rows))
+
+    def _on_double_click(self, index):
+        row = index.row()
+        part_id = int(self.proxy_model.data(self.proxy_model.index(row, 0)))
+        self.double_clicked.emit(part_id)
 
     def get_column_order(self):
         header = self.table_view.horizontalHeader()
@@ -154,26 +180,22 @@ class PartsTableWidget(QWidget):
             if current_pos != -1 and current_pos != target_pos:
                 header.moveSection(current_pos, target_pos)
 
-    def _on_selection(self, selected, deselected):
-        indexes = self.table_view.selectionModel().selectedRows()
-        if not indexes:
-            self.selection_changed.emit(0)
-            return
-        row = indexes[0].row()
-        part_id = int(self.proxy_model.data(self.proxy_model.index(row, 0)))
-        self.selection_changed.emit(part_id)
-
-    def _on_double_click(self, index):
-        row = index.row()
-        part_id = int(self.proxy_model.data(self.proxy_model.index(row, 0)))
-        self.double_clicked.emit(part_id)
-
     def load_data(self, category_id=None, filter_type="all", location_path=None):
         self.model.load_data(category_id, filter_type, location_path)
 
     def get_selected_part_id(self):
-        indexes = self.table_view.selectionModel().selectedRows()
-        if not indexes:
+        rows = self.table_view.selectionModel().selectedRows()
+        if not rows:
             return None
-        row = indexes[0].row()
-        return int(self.proxy_model.data(self.proxy_model.index(row, 0)))
+        return int(self.proxy_model.data(self.proxy_model.index(rows[0].row(), 0)))
+
+    def get_selected_part_ids(self):
+        rows = self.table_view.selectionModel().selectedRows()
+        ids = []
+        for idx in rows:
+            part_id = int(self.proxy_model.data(self.proxy_model.index(idx.row(), 0)))
+            ids.append(part_id)
+        return ids
+
+    def get_selected_count(self):
+        return len(self.table_view.selectionModel().selectedRows())
