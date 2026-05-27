@@ -1,11 +1,9 @@
-# Copyright (c) 2026 Dykus
-# SPDX-License-Identifier: MIT
-
+# main.py
 import sys
 import logging
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt, QCoreApplication
+from PySide6.QtCore import Qt, QCoreApplication, QTranslator, QLocale
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -25,9 +23,20 @@ logging.basicConfig(
 def main():
     QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     app = QApplication(sys.argv)
+
+    # Попытка загрузить русский перевод для стандартных диалогов Qt
+    translator = QTranslator()
+    if translator.load(QLocale(QLocale.Russian, QLocale.Russia), "qt", "_", ":/translations"):
+        app.installTranslator(translator)
+    else:
+        import os
+        qt_translations_path = os.path.join(os.path.dirname(sys.executable), "translations", "qt_ru.qm")
+        if os.path.exists(qt_translations_path) and translator.load(qt_translations_path):
+            app.installTranslator(translator)
+
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
-    
+
     db = Database(DB_PATH)
     db.init_schema()
 

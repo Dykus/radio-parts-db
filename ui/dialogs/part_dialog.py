@@ -4,9 +4,10 @@ import logging
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox,
     QDateTimeEdit, QTextEdit, QDialogButtonBox, QMessageBox, QFileDialog,
-    QWidget, QHBoxLayout, QPushButton
+    QWidget, QHBoxLayout, QPushButton, QMenu
 )
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QPoint
+from PySide6.QtGui import QAction
 from ui.dialogs.category_selector import CategorySelectorDialog
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,85 @@ class PartDialog(QDialog):
         self._init_ui()
         if part_data:
             self._fill_form(part_data)
+
+    # ---------- Универсальная установка русского контекстного меню ----------
+    def _setup_russian_context_menu(self, widget):
+        """Устанавливает кастомное контекстное меню на русском для виджетов."""
+        if isinstance(widget, QLineEdit):
+            def show_menu(pos):
+                menu = QMenu()
+                if widget.isUndoAvailable():
+                    act = QAction("Отменить", widget)
+                    act.triggered.connect(widget.undo)
+                    menu.addAction(act)
+                if widget.isRedoAvailable():
+                    act = QAction("Повторить", widget)
+                    act.triggered.connect(widget.redo)
+                    menu.addAction(act)
+                if not menu.isEmpty():
+                    menu.addSeparator()
+                act_cut = QAction("Вырезать", widget)
+                act_cut.triggered.connect(widget.cut)
+                menu.addAction(act_cut)
+                act_copy = QAction("Копировать", widget)
+                act_copy.triggered.connect(widget.copy)
+                menu.addAction(act_copy)
+                act_paste = QAction("Вставить", widget)
+                act_paste.triggered.connect(widget.paste)
+                menu.addAction(act_paste)
+                if not widget.isReadOnly():
+                    act_del = QAction("Удалить", widget)
+                    act_del.triggered.connect(widget.del_)
+                    menu.addAction(act_del)
+                menu.addSeparator()
+                act_sel = QAction("Выделить всё", widget)
+                act_sel.triggered.connect(widget.selectAll)
+                menu.addAction(act_sel)
+                menu.exec(widget.mapToGlobal(pos))
+            widget.setContextMenuPolicy(Qt.CustomContextMenu)
+            widget.customContextMenuRequested.connect(show_menu)
+
+        elif isinstance(widget, QTextEdit):
+            def show_menu(pos):
+                menu = QMenu()
+                if widget.document().isUndoAvailable():
+                    act = QAction("Отменить", widget)
+                    act.triggered.connect(widget.undo)
+                    menu.addAction(act)
+                if widget.document().isRedoAvailable():
+                    act = QAction("Повторить", widget)
+                    act.triggered.connect(widget.redo)
+                    menu.addAction(act)
+                if not menu.isEmpty():
+                    menu.addSeparator()
+                act_cut = QAction("Вырезать", widget)
+                act_cut.triggered.connect(widget.cut)
+                menu.addAction(act_cut)
+                act_copy = QAction("Копировать", widget)
+                act_copy.triggered.connect(widget.copy)
+                menu.addAction(act_copy)
+                act_paste = QAction("Вставить", widget)
+                act_paste.triggered.connect(widget.paste)
+                menu.addAction(act_paste)
+                act_del = QAction("Удалить", widget)
+                act_del.triggered.connect(lambda: widget.textCursor().removeSelectedText())
+                menu.addAction(act_del)
+                menu.addSeparator()
+                act_sel = QAction("Выделить всё", widget)
+                act_sel.triggered.connect(widget.selectAll)
+                menu.addAction(act_sel)
+                menu.exec(widget.mapToGlobal(pos))
+            widget.setContextMenuPolicy(Qt.CustomContextMenu)
+            widget.customContextMenuRequested.connect(show_menu)
+
+        elif isinstance(widget, QComboBox) and widget.isEditable():
+            line_edit = widget.lineEdit()
+            if line_edit:
+                self._setup_russian_context_menu(line_edit)
+
+        elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+            if hasattr(widget, 'lineEdit') and widget.lineEdit():
+                self._setup_russian_context_menu(widget.lineEdit())
 
     def _init_ui(self):
         layout = QFormLayout(self)
@@ -42,13 +122,12 @@ class PartDialog(QDialog):
         self.category_edit.setReadOnly(True)
         self.btn_select_category = QPushButton("📂 ...")
         self.btn_select_category.setMaximumWidth(40)
-        self.btn_select_category.setToolTip("Выбрать категорию из дерева")
         self.btn_select_category.clicked.connect(self._open_category_selector)
         category_layout.addWidget(self.category_edit)
         category_layout.addWidget(self.btn_select_category)
         layout.addRow("Категория", category_widget)
 
-        # --- Тип детали (выпадающий список с редактированием) ---
+        # --- Тип детали ---
         self.part_type_combo = QComboBox()
         self.part_type_combo.setEditable(True)
         self.part_type_combo.setPlaceholderText("Введите или выберите тип детали")
@@ -69,9 +148,8 @@ class PartDialog(QDialog):
         nominal_layout.addWidget(self.unit_combo)
         layout.addRow("Номинал / значение", nominal_widget)
 
-        # --- Кнопка "Собрать название" ---
+        # --- Кнопка сборки названия ---
         self.btn_assemble = QPushButton("🧩 Собрать название")
-        self.btn_assemble.setToolTip("Сформировать название из категории, номинала и корпуса")
         self.btn_assemble.clicked.connect(self._assemble_name)
         layout.addRow("", self.btn_assemble)
 
@@ -82,7 +160,7 @@ class PartDialog(QDialog):
         self.package_combo.setPlaceholderText("Для конденсаторов: Диаметр x Высота, например 10x17")
         layout.addRow("Корпус", self.package_combo)
 
-        # --- Группа размеров (видима для конденсаторов) ---
+        # --- Группа размеров (для конденсаторов) ---
         self.dims_group = QWidget()
         dims_layout = QFormLayout(self.dims_group)
         dims_layout.setContentsMargins(0, 0, 0, 0)
@@ -90,30 +168,22 @@ class PartDialog(QDialog):
         self.diameter_spin.setRange(0, 100)
         self.diameter_spin.setDecimals(1)
         self.diameter_spin.setSuffix(" мм")
-        self.diameter_spin.setToolTip("Диаметр корпуса в мм")
         dims_layout.addRow("Диаметр (мм)", self.diameter_spin)
-        
         self.height_spin = QDoubleSpinBox()
         self.height_spin.setRange(0, 200)
         self.height_spin.setDecimals(1)
         self.height_spin.setSuffix(" мм")
-        self.height_spin.setToolTip("Высота корпуса в мм")
         dims_layout.addRow("Высота (мм)", self.height_spin)
-        
         self.lead_pitch_spin = QDoubleSpinBox()
         self.lead_pitch_spin.setRange(0, 50)
         self.lead_pitch_spin.setDecimals(1)
         self.lead_pitch_spin.setSuffix(" мм")
-        self.lead_pitch_spin.setToolTip("Расстояние между выводами в мм")
         dims_layout.addRow("Шаг выводов (мм)", self.lead_pitch_spin)
-        
         self.lead_diameter_spin = QDoubleSpinBox()
         self.lead_diameter_spin.setRange(0, 5)
         self.lead_diameter_spin.setDecimals(2)
         self.lead_diameter_spin.setSuffix(" мм")
-        self.lead_diameter_spin.setToolTip("Толщина выводов в мм")
         dims_layout.addRow("Толщина выводов (мм)", self.lead_diameter_spin)
-        
         layout.addRow("Габариты (для конденсаторов)", self.dims_group)
         self.dims_group.setVisible(False)
 
@@ -127,13 +197,13 @@ class PartDialog(QDialog):
         self.status_combo.setCurrentText("🛒 Новое")
         layout.addRow("Состояние", self.status_combo)
 
-        # --- Производитель (выпадающий список с редактированием) ---
+        # --- Производитель ---
         self.manufacturer_combo = QComboBox()
         self.manufacturer_combo.setEditable(True)
         self.manufacturer_combo.setPlaceholderText("Введите или выберите производителя")
         layout.addRow("Производитель", self.manufacturer_combo)
 
-        # --- Артикул (MPN) ---
+        # --- Артикул ---
         self.part_number_edit = QLineEdit()
         layout.addRow("Артикул", self.part_number_edit)
 
@@ -204,7 +274,7 @@ class PartDialog(QDialog):
         datasheet_layout.addWidget(self.datasheet_btn)
         layout.addRow("Даташит", datasheet_widget)
 
-        # --- Дата ревизии с кнопкой "Сегодня" ---
+        # --- Дата ревизии (поле + кнопка "Сегодня") ---
         revision_widget = QWidget()
         revision_layout = QHBoxLayout(revision_widget)
         revision_layout.setContentsMargins(0, 0, 0, 0)
@@ -228,11 +298,20 @@ class PartDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
-        # Загружаем выпадающие списки из БД
+        # Загружаем выпадающие списки
         self._load_comboboxes()
 
+        # Применяем русское контекстное меню ко всем полям
+        for w in [self.name_edit, self.value_edit, self.part_number_edit, self.notes_edit,
+                  self.part_type_combo, self.manufacturer_combo,
+                  self.location_place_combo, self.location_container_combo,
+                  self.location_shelf_combo, self.location_section_combo,
+                  self.quantity_spin, self.price_spin]:
+            self._setup_russian_context_menu(w)
+        self._setup_russian_context_menu(self.category_edit)
+
+    # ---------- Загрузка словарей ----------
     def _load_comboboxes(self):
-        """Загружает значения для типов деталей и производителей из БД"""
         part_types = set(self.db.get_dictionary_values('part_type'))
         for part in self.db.get_all_parts_filtered():
             pt = part.get('part_type')
@@ -249,8 +328,8 @@ class PartDialog(QDialog):
         self.manufacturer_combo.clear()
         self.manufacturer_combo.addItems(sorted(manufacturers))
 
+    # ---------- Логика размеров и сборки названия ----------
     def _update_units_by_category(self, category_path):
-        """Обновляет список единиц измерения в зависимости от категории"""
         path_lower = category_path.lower()
         if "конденсатор" in path_lower:
             units = ["", "пФ", "нФ", "мкФ", "Ф"]
@@ -270,7 +349,6 @@ class PartDialog(QDialog):
             combo.setCurrentIndex(0)
 
     def _extract_power_from_category(self, category_path):
-        """Извлекает мощность (например, 0.5 W) из последнего сегмента категории"""
         if not category_path:
             return ''
         last_part = category_path.split('/')[-1].strip()
@@ -290,15 +368,12 @@ class PartDialog(QDialog):
         self._show_dims_for_capacitor(category_path)
 
     def _show_dims_for_capacitor(self, category_path):
-        """Показывает блок размеров, если категория содержит 'конденсатор'"""
         if category_path and 'конденсатор' in category_path.lower():
             self.dims_group.setVisible(True)
         else:
             self.dims_group.setVisible(False)
 
-    # ---------- Парсинг номинала (убрано .0) ----------
     def _parse_and_normalize(self, raw_text: str):
-        """Распознаёт число и единицу из строки, поддерживает пробел между ними."""
         if not raw_text:
             return None, "", ""
         text = raw_text.strip()
@@ -348,46 +423,32 @@ class PartDialog(QDialog):
         if category_path:
             last_part = category_path.split('/')[-1].strip()
             if re.search(r'\d+V', last_part, re.IGNORECASE):
-                voltage = last_part
+                voltage = last_part.replace('V', 'В').replace('v', 'В')
             else:
                 power = self._extract_power_from_category(category_path)
-        
         raw_value = self.value_edit.text().strip()
         numeric, unit, normalized = self._parse_and_normalize(raw_value)
-        
-        # Если единица не распознана, но выбрана в комбобоксе – берём её
         if not unit and self.unit_combo.currentText():
             unit = self.unit_combo.currentText()
             if numeric is not None:
                 normalized = f"{numeric} {unit}"
             else:
                 normalized = unit
-        
         if unit:
             value_part = normalized
         elif numeric is not None:
             value_part = str(numeric)
         else:
             value_part = raw_value
-        
         package = self.package_combo.currentText().strip()
-        name_parts = []
-        if value_part:
-            name_parts.append(value_part)
-        if voltage:
-            name_parts.append(voltage)
-        if power:
-            name_parts.append(power)
-        if package:
-            name_parts.append(package)
-        
+        name_parts = [p for p in (value_part, voltage, power, package) if p]
         assembled = " ".join(name_parts)
         if assembled:
             self.name_edit.setText(assembled)
         else:
             QMessageBox.information(self, "Невозможно собрать", "Заполните хотя бы номинал или выберите категорию с параметрами")
 
-    # ---------- Вспомогательные методы ----------
+    # ---------- Вспомогательные методы (каскадные обновления места, сохранение) ----------
     def _browse_file(self, line_edit, filter_str):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите файл", "", filter_str)
         if path:
@@ -492,47 +553,30 @@ class PartDialog(QDialog):
             self._show_dims_for_capacitor(path)
         else:
             self.category_edit.setText("")
-        # Тип детали
-        part_type_val = data.get('part_type', '')
-        idx = self.part_type_combo.findText(part_type_val)
-        if idx >= 0:
-            self.part_type_combo.setCurrentIndex(idx)
-        else:
-            self.part_type_combo.setCurrentText(part_type_val)
-        # Производитель
-        manufacturer_val = data.get('manufacturer', '')
-        idx = self.manufacturer_combo.findText(manufacturer_val)
-        if idx >= 0:
-            self.manufacturer_combo.setCurrentIndex(idx)
-        else:
-            self.manufacturer_combo.setCurrentText(manufacturer_val)
+        pt_val = data.get('part_type', '')
+        idx = self.part_type_combo.findText(pt_val)
+        self.part_type_combo.setCurrentIndex(idx) if idx >= 0 else self.part_type_combo.setCurrentText(pt_val)
+        m_val = data.get('manufacturer', '')
+        idx = self.manufacturer_combo.findText(m_val)
+        self.manufacturer_combo.setCurrentIndex(idx) if idx >= 0 else self.manufacturer_combo.setCurrentText(m_val)
         self.part_number_edit.setText(data.get('part_number', ''))
         self.package_combo.setCurrentText(data.get('package', ''))
         self.quantity_spin.setValue(data.get('quantity', 0))
         self.price_spin.setValue(data.get('price', 0))
-
-        # Размеры
         self.diameter_spin.setValue(data.get('diameter_mm', 0) or 0)
         self.height_spin.setValue(data.get('height_mm', 0) or 0)
         self.lead_pitch_spin.setValue(data.get('lead_pitch_mm', 0) or 0)
         self.lead_diameter_spin.setValue(data.get('lead_diameter_mm', 0) or 0)
 
-        # Номинал
         value_numeric = data.get('value_numeric')
         value_unit = data.get('value_unit', '')
         value_raw = data.get('value_raw', '')
         if value_raw:
             self.value_edit.setText(value_raw)
         elif value_numeric is not None and value_unit:
-            if isinstance(value_numeric, float) and value_numeric.is_integer():
-                self.value_edit.setText(str(int(value_numeric)))
-            else:
-                self.value_edit.setText(str(value_numeric))
+            self.value_edit.setText(str(int(value_numeric)) if isinstance(value_numeric, float) and value_numeric.is_integer() else str(value_numeric))
         elif value_numeric is not None:
-            if isinstance(value_numeric, float) and value_numeric.is_integer():
-                self.value_edit.setText(str(int(value_numeric)))
-            else:
-                self.value_edit.setText(str(value_numeric))
+            self.value_edit.setText(str(int(value_numeric)) if isinstance(value_numeric, float) and value_numeric.is_integer() else str(value_numeric))
         if value_unit:
             idx = self.unit_combo.findText(value_unit)
             if idx >= 0:
@@ -541,7 +585,6 @@ class PartDialog(QDialog):
                 self.unit_combo.addItem(value_unit)
                 self.unit_combo.setCurrentText(value_unit)
 
-        # Статус
         status_val = data.get('status', 'Новое')
         for i in range(self.status_combo.count()):
             txt = self.status_combo.itemText(i)
@@ -550,7 +593,6 @@ class PartDialog(QDialog):
                 self.status_combo.setCurrentIndex(i)
                 break
 
-        # Место хранения
         location = data.get('location', '')
         if location:
             parts = [p.strip() for p in location.split('/')]
@@ -578,7 +620,6 @@ class PartDialog(QDialog):
         if not self.name_edit.text().strip():
             QMessageBox.warning(self, "Ошибка", "⚠️ Наименование обязательно!")
             return
-        # Добавляем новые значения в словари через БД (метод add_dictionary_value)
         part_type = self.part_type_combo.currentText().strip()
         if part_type:
             self.db.add_dictionary_value('part_type', part_type)
