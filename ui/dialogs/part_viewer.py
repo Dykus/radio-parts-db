@@ -7,14 +7,13 @@ from PySide6.QtWidgets import (
     QTextEdit, QScrollArea, QFileDialog, QMessageBox, QWidget, QGridLayout,
     QSizePolicy
 )
-from PySide6.QtCore import Qt, QEvent
+from PySide6.QtCore import Qt, QEvent, QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtGui import QTextDocument
 from .part_dialog import PartDialog
 
 class ImageZoomWindow(QDialog):
-    # ... (без изменений, оставляем как было)
     def __init__(self, pixmap, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Увеличенное изображение")
@@ -95,6 +94,7 @@ class PartViewer(QDialog):
         self.setWindowTitle(f"Просмотр детали: {part_data.get('name', 'Без имени')}")
         self.setMinimumSize(800, 600)
         self.setWindowFlags(self.windowFlags() | Qt.Window)
+        self.current_pixmap = None
         self._init_ui()
         self._fill_data()
 
@@ -113,15 +113,15 @@ class PartViewer(QDialog):
 
         content_splitter = QHBoxLayout()
 
-        # Левая панель: изображение
+        # Левая панель: изображение (как в InfoPanelWidget)
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setMinimumSize(200, 200)
+        self.image_label.setMaximumSize(400, 400)
         self.image_label.setStyleSheet("border: 1px solid gray; background-color: #f0f0f0;")
         self.image_label.setScaledContents(False)
-        self.image_label.setMaximumSize(400, 400)
         left_layout.addWidget(self.image_label, alignment=Qt.AlignCenter)
 
         img_btn_layout = QHBoxLayout()
@@ -196,7 +196,6 @@ class PartViewer(QDialog):
         content_splitter.addWidget(right_widget, 2)
         main_layout.addLayout(content_splitter)
 
-        # Нижние кнопки
         btn_layout = QHBoxLayout()
         btn_edit = QPushButton("✏️ Редактировать")
         btn_edit.clicked.connect(self._edit_part)
@@ -210,7 +209,19 @@ class PartViewer(QDialog):
         btn_layout.addWidget(btn_close)
         main_layout.addLayout(btn_layout)
 
-        self.current_pixmap = None
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._rescale_image()
+
+    def _rescale_image(self):
+        """Масштабирует изображение под размер метки с сохранением пропорций"""
+        if self.current_pixmap and not self.current_pixmap.isNull():
+            max_size = self.image_label.maximumSize()
+            if max_size.width() <= 0 or max_size.height() <= 0:
+                max_size = QSize(400, 400)
+            scaled = self.current_pixmap.scaled(max_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.image_label.setPixmap(scaled)
+            self.image_label.setFixedSize(scaled.size())
 
     def _fill_data(self):
         self.name_label.setText(self.part_data.get('name', ''))
@@ -314,13 +325,13 @@ class PartViewer(QDialog):
                 print(f"Ошибка загрузки изображения: {e}")
         if not pixmap.isNull():
             self.current_pixmap = pixmap
-            scaled = pixmap.scaled(self.image_label.maximumSize(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.image_label.setPixmap(scaled)
+            self._rescale_image()
             self.image_label.setToolTip("Кликните правой кнопкой для увеличения")
         else:
             self.current_pixmap = None
             self.image_label.setText("Нет фото")
             self.image_label.setStyleSheet("border: 1px solid gray; background-color: #f0f0f0;")
+            self.image_label.setFixedSize(200, 200)
 
     def _zoom_image(self):
         if self.current_pixmap:
@@ -348,7 +359,6 @@ class PartViewer(QDialog):
             if updated:
                 self.part_data = updated
                 self._fill_data()
-            # Обновляем главное окно (если есть метод _refresh_all)
             parent = self.parent()
             if parent and hasattr(parent, '_refresh_all'):
                 parent._refresh_all()
@@ -373,21 +383,21 @@ class PartViewer(QDialog):
         <p><strong>Статус:</strong> {self.part_data.get('status', '')}</p>
         <hr>
         <table border="0">
-        <tr><td><strong>ID</strong></td><td>{self.part_data.get('id', '')}</td></tr>
-        <tr><td><strong>Категория</strong></td><td>{self._get_category_path(self.part_data.get('category_id')) if self.part_data.get('category_id') else '—'}</td></tr>
-        <tr><td><strong>Тип детали</strong></td><td>{self.part_data.get('part_type', '—')}</td></tr>
-        <tr><td><strong>Номинал</strong></td><td>{self.property_labels.get('value_nice', QLabel()).text()}</td></tr>
-        <tr><td><strong>Корпус</strong></td><td>{self.part_data.get('package', '—')}</td></tr>
-        <tr><td><strong>Диаметр</strong></td><td>{self._format_dim(self.part_data.get('diameter_mm'), 'мм')}</td></tr>
-        <tr><td><strong>Высота</strong></td><td>{self._format_dim(self.part_data.get('height_mm'), 'мм')}</td></tr>
-        <tr><td><strong>Шаг выводов</strong></td><td>{self._format_dim(self.part_data.get('lead_pitch_mm'), 'мм')}</td></tr>
-        <tr><td><strong>Толщина выводов</strong></td><td>{self._format_dim(self.part_data.get('lead_diameter_mm'), 'мм')}</td></tr>
-        <tr><td><strong>Количество</strong></td><td>{self.part_data.get('quantity', 0)}</td></tr>
-        <tr><td><strong>Цена</strong></td><td>{self.part_data.get('price', 0):.2f} ₽</td></tr>
-        <tr><td><strong>Место</strong></td><td>{self.part_data.get('location', '—')}</td></tr>
-        <tr><td><strong>Производитель</strong></td><td>{self.part_data.get('manufacturer', '—')}</td></tr>
-        <tr><td><strong>Артикул</strong></td><td>{self.part_data.get('part_number', '—')}</td></tr>
-        <tr><td><strong>Дата ревизии</strong></td><td>{self.part_data.get('revision_date', '—')}</td></tr>
+        <tr><th>ID</th><td>{self.part_data.get('id', '')}</td></tr>
+        <tr><th>Категория</th><td>{self._get_category_path(self.part_data.get('category_id')) if self.part_data.get('category_id') else '—'}</td></tr>
+        <tr><th>Тип детали</th><td>{self.part_data.get('part_type', '—')}</td></tr>
+        <tr><th>Номинал</th><td>{self.property_labels.get('value_nice', QLabel()).text()}</td></tr>
+        <tr><th>Корпус</th><td>{self.part_data.get('package', '—')}</td></tr>
+        <tr><th>Диаметр</th><td>{self._format_dim(self.part_data.get('diameter_mm'), 'мм')}</td></tr>
+        <tr><th>Высота</th><td>{self._format_dim(self.part_data.get('height_mm'), 'мм')}</td></tr>
+        <tr><th>Шаг выводов</th><td>{self._format_dim(self.part_data.get('lead_pitch_mm'), 'мм')}</td></tr>
+        <tr><th>Толщина выводов</th><td>{self._format_dim(self.part_data.get('lead_diameter_mm'), 'мм')}</td></tr>
+        <tr><th>Количество</th><td>{self.part_data.get('quantity', 0)}</td></tr>
+        <tr><th>Цена</th><td>{self.part_data.get('price', 0):.2f} ₽</td></tr>
+        <tr><th>Место</th><td>{self.part_data.get('location', '—')}</td></tr>
+        <tr><th>Производитель</th><td>{self.part_data.get('manufacturer', '—')}</td></tr>
+        <tr><th>Артикул</th><td>{self.part_data.get('part_number', '—')}</td></tr>
+        <tr><th>Дата ревизии</th><td>{self.part_data.get('revision_date', '—')}</td></tr>
         </table>
         <p><strong>Заметки:</strong><br>{self.part_data.get('notes', '')}</p>
         </body>
