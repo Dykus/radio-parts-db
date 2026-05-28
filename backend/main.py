@@ -32,6 +32,14 @@ class PartResponse(BaseModel):
     description: Optional[str] = None
     manufacturer: Optional[str] = None
     mpn: Optional[str] = None
+    # Новые поля для синхронизации с Desktop
+    value_numeric: Optional[float] = None
+    value_unit: Optional[str] = None
+    value_raw: Optional[str] = None
+    diameter_mm: Optional[float] = None
+    height_mm: Optional[float] = None
+    lead_pitch_mm: Optional[float] = None
+    lead_diameter_mm: Optional[float] = None
 
 class PartCreate(BaseModel):
     name: str
@@ -46,6 +54,13 @@ class PartCreate(BaseModel):
     description: Optional[str] = None
     manufacturer: Optional[str] = None
     mpn: Optional[str] = None
+    value_numeric: Optional[float] = None
+    value_unit: Optional[str] = None
+    value_raw: Optional[str] = None
+    diameter_mm: Optional[float] = None
+    height_mm: Optional[float] = None
+    lead_pitch_mm: Optional[float] = None
+    lead_diameter_mm: Optional[float] = None
 
 class PartUpdate(BaseModel):
     name: Optional[str] = None
@@ -60,6 +75,13 @@ class PartUpdate(BaseModel):
     description: Optional[str] = None
     manufacturer: Optional[str] = None
     mpn: Optional[str] = None
+    value_numeric: Optional[float] = None
+    value_unit: Optional[str] = None
+    value_raw: Optional[str] = None
+    diameter_mm: Optional[float] = None
+    height_mm: Optional[float] = None
+    lead_pitch_mm: Optional[float] = None
+    lead_diameter_mm: Optional[float] = None
 
 # === Инициализация ===
 
@@ -75,7 +97,7 @@ async def lifespan(app: FastAPI):
         print(f"✅ База данных подключена: {DB_PATH}")
     yield
 
-app = FastAPI(title="RadioPartsDB API", version="0.19.0", lifespan=lifespan)
+app = FastAPI(title="RadioPartsDB API", version="0.21.1", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -94,8 +116,12 @@ def get_db():
 
 def _patch_db_dict(d: dict) -> dict:
     """Добавляет отсутствующие ключи со значением None для совместимости с Pydantic V2"""
-    required = ['part_type', 'package', 'location', 'category_id', 'image_path', 
-                'description', 'manufacturer', 'mpn', 'status']
+    required = [
+        'part_type', 'package', 'location', 'category_id', 'image_path',
+        'description', 'manufacturer', 'mpn', 'status',
+        'value_numeric', 'value_unit', 'value_raw',
+        'diameter_mm', 'height_mm', 'lead_pitch_mm', 'lead_diameter_mm'
+    ]
     for key in required:
         if key not in d:
             d[key] = None
@@ -107,13 +133,12 @@ def _patch_db_dict(d: dict) -> dict:
 
 @app.get("/")
 def read_root():
-    return {"status": "online", "message": "RadioPartsDB API v0.19.0"}
+    return {"status": "online", "message": "RadioPartsDB API v0.21.1"}
 
 @app.get("/api/parts", response_model=List[PartResponse])
-def get_parts(skip: int = 0, limit: int = 100, db: Database = Depends(get_db)):
+def get_parts(skip: int = 0, limit: int = 2000, db: Database = Depends(get_db)):
     try:
         parts = db.get_all_parts_filtered(category_id=None, filter_type="all", location_path=None)
-        # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: патчим словари перед валидацией
         fixed = [_patch_db_dict(p.copy()) for p in parts]
         return fixed[skip:skip+limit]
     except Exception as e:
@@ -122,33 +147,39 @@ def get_parts(skip: int = 0, limit: int = 100, db: Database = Depends(get_db)):
 @app.get("/api/parts/{part_id}", response_model=PartResponse)
 def get_part(part_id: int, db: Database = Depends(get_db)):
     part = db.get_part(part_id)
-    if not part: raise HTTPException(status_code=404, detail="Part not found")
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
     return _patch_db_dict(part.copy())
 
 @app.post("/api/parts", response_model=PartResponse)
 def create_part(part: PartCreate, db: Database = Depends(get_db)):
     try:
-        new_id = db.create_part(part.model_dump())
+        new_id = db.create_part(part.model_dump(exclude_unset=True))
         return _patch_db_dict(db.get_part(new_id).copy())
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/parts/{part_id}", response_model=PartResponse)
 def update_part(part_id: int, part: PartUpdate, db: Database = Depends(get_db)):
     try:
         existing = db.get_part(part_id)
-        if not existing: raise HTTPException(status_code=404, detail="Part not found")
+        if not existing:
+            raise HTTPException(status_code=404, detail="Part not found")
         update_data = {k: v for k, v in part.model_dump().items() if v is not None}
         db.update_part(part_id, {**existing, **update_data})
         return _patch_db_dict(db.get_part(part_id).copy())
-    except HTTPException: raise
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/parts/{part_id}")
 def delete_part(part_id: int, db: Database = Depends(get_db)):
     try:
         db.delete_part(part_id)
         return {"message": "Part deleted"}
-    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/categories")
 def get_categories(db: Database = Depends(get_db)):
@@ -158,10 +189,13 @@ def get_categories(db: Database = Depends(get_db)):
 def get_categories_tree(db: Database = Depends(get_db)):
     cats = db.get_categories()
     tree, item_map = {}, {}
-    for cid, name, pid in cats: item_map[cid] = {"name": name, "children": {}}
     for cid, name, pid in cats:
-        if pid in (None, 0) or pid not in item_map: tree[name] = item_map[cid]["children"]
-        else: item_map[pid]["children"][name] = item_map[cid]["children"]
+        item_map[cid] = {"name": name, "children": {}}
+    for cid, name, pid in cats:
+        if pid in (None, 0) or pid not in item_map:
+            tree[name] = item_map[cid]["children"]
+        else:
+            item_map[pid]["children"][name] = item_map[cid]["children"]
     return tree
 
 @app.get("/api/locations/tree")
