@@ -2,12 +2,13 @@
 import os
 import logging
 import json
+from pathlib import Path
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QPushButton, QLineEdit, QStatusBar, QLabel, QMessageBox, QFileDialog, QMenuBar, QComboBox
+    QPushButton, QLineEdit, QStatusBar, QLabel, QMessageBox, QFileDialog, QMenuBar, QComboBox, QMenu, QApplication
 )
-from PySide6.QtCore import Qt, QRect
-from PySide6.QtGui import QStandardItemModel, QAction, QShortcut, QKeySequence
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction, QShortcut, QKeySequence
 
 from ui.dialogs.part_dialog import PartDialog
 from ui.dialogs.batch_edit_dialog import BatchEditDialog
@@ -68,35 +69,49 @@ class MainWindow(QMainWindow):
                 'location_tree_depth': self.location_tree_depth,
                 'selector_tree_depth': self.selector_tree_depth
             }
-            with open(SETTINGS_FILE, 'w') as f: 
+            # Добавляем токен, если он есть в saved_settings
+            if 'yandex_token' in self.saved_settings:
+                settings['yandex_token'] = self.saved_settings['yandex_token']
+            with open(SETTINGS_FILE, 'w') as f:
                 json.dump(settings, f, indent=2)
             logger.info(f" Настройки сохранены в {SETTINGS_FILE}")
-        except Exception as e: 
+        except Exception as e:
             logger.warning(f"Ошибка сохранения настроек: {e}")
+
+    def _save_token(self, token):
+        """Сохраняет токен Яндекс.Диска в отдельном файле или в настройках."""
+        try:
+            if os.path.exists(SETTINGS_FILE):
+                with open(SETTINGS_FILE, 'r') as f:
+                    settings = json.load(f)
+            else:
+                settings = {}
+            settings['yandex_token'] = token
+            with open(SETTINGS_FILE, 'w') as f:
+                json.dump(settings, f, indent=2)
+            logger.info(f" Токен сохранён в {SETTINGS_FILE}")
+        except Exception as e:
+            logger.warning(f"Ошибка сохранения токена: {e}")
 
     def _apply_saved_settings(self):
         if not self.saved_settings:
             return
-        # Восстанавливаем максимизацию или геометрию
         if self.saved_settings.get('maximized', False):
             self.showMaximized()
         else:
             geom = self.saved_settings.get('geometry')
             if geom and len(geom) == 4:
                 self.setGeometry(geom[0], geom[1], geom[2], geom[3])
-        # Восстанавливаем размеры сплиттера
         if 'main_splitter_sizes' in self.saved_settings:
             sizes = self.saved_settings['main_splitter_sizes']
             if len(sizes) == 3 and all(s > 0 for s in sizes):
                 self.main_splitter.setSizes(sizes)
-        # Восстанавливаем ширину колонок таблицы
         if 'table_column_widths' in self.saved_settings:
             widths = self.saved_settings['table_column_widths']
             header = self.parts_table.table_view.horizontalHeader()
             for i, width in enumerate(widths):
                 if width > 0:
                     header.resizeSection(i, width)
-        # Восстанавливаем порядок колонок
         if 'table_column_order' in self.saved_settings:
             self.parts_table.set_column_order(self.saved_settings['table_column_order'])
 
@@ -114,39 +129,66 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         menubar = self.menuBar()
-        main_menu = menubar.addMenu("Меню")
         
-        action_settings = QAction(" Настройка программы", self)
-        action_settings.triggered.connect(self._open_settings)
-        main_menu.addAction(action_settings)
+        file_menu = menubar.addMenu("Файл")
         
-        action_help = QAction("❓ Помощь", self)
-        action_help.triggered.connect(self._open_help)
-        main_menu.addAction(action_help)
+        import_action = QAction("📥 Импорт CSV", self)
+        import_action.triggered.connect(self._import_csv)
+        file_menu.addAction(import_action)
         
-        action_about = QAction("ℹ️ О программе", self)
-        action_about.triggered.connect(self._show_about)
-        main_menu.addAction(action_about)
+        export_menu = QMenu("📤 Экспорт", self)
+        export_csv_action = QAction("CSV файл (*.csv)", self)
+        export_csv_action.triggered.connect(lambda: self._export_data("csv"))
+        export_excel_action = QAction("Excel файл (*.xlsx)", self)
+        export_excel_action.triggered.connect(lambda: self._export_data("excel"))
+        export_menu.addAction(export_csv_action)
+        export_menu.addAction(export_excel_action)
+        file_menu.addMenu(export_menu)
         
-        main_menu.addSeparator()
+        file_menu.addSeparator()
         
-        action_exit = QAction("🚪 Выход", self)
-        action_exit.triggered.connect(self.close)
-        main_menu.addAction(action_exit)
+        backup_action = QAction("📤 Выгрузить резервную копию в Яндекс.Диск", self)
+        backup_action.triggered.connect(self._backup_to_cloud)
+        file_menu.addAction(backup_action)
+        
+        restore_action = QAction("📥 Восстановить из резервной копии (Яндекс.Диск)", self)
+        restore_action.triggered.connect(self._restore_from_cloud)
+        file_menu.addAction(restore_action)
+        
+        file_menu.addSeparator()
+        
+        settings_action = QAction("⚙️ Настройки", self)
+        settings_action.triggered.connect(self._open_settings)
+        file_menu.addAction(settings_action)
+        
+        file_menu.addSeparator()
+        
+        exit_action = QAction("🚪 Выход", self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        help_menu = menubar.addMenu("Помощь")
+        help_action = QAction("❓ Помощь", self)
+        help_action.triggered.connect(self._open_help)
+        help_menu.addAction(help_action)
+        
+        about_action = QAction("ℹ️ О программе", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
 
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
         
         toolbar = QHBoxLayout()
+        
         self.add_btn = QPushButton("➕ Добавить")
         self.add_btn.clicked.connect(self._add_part)
         self.edit_btn = QPushButton("✏️ Редактировать")
         self.edit_btn.clicked.connect(self._edit_part)
         self.del_btn = QPushButton("🗑️ Удалить")
         self.del_btn.clicked.connect(self._delete_part)
-        self.import_btn = QPushButton("📥 Импорт CSV")
-        self.import_btn.clicked.connect(self._import_csv)
+        
         self.batch_edit_btn = QPushButton("✏️ Пакетное редактирование")
         self.batch_edit_btn.setEnabled(False)
         self.batch_edit_btn.clicked.connect(self._batch_edit)
@@ -169,8 +211,8 @@ class MainWindow(QMainWindow):
         self.search_edit.setPlaceholderText("🔍 Поиск...")
         self.search_edit.textChanged.connect(self._filter_table)
         
-        for w in [self.add_btn, self.edit_btn, self.del_btn, self.import_btn, self.batch_edit_btn, QLabel("|"), 
-                  self.filter_all_btn, self.filter_stock_btn, self.filter_low_btn, self.filter_out_btn]: 
+        for w in [self.add_btn, self.edit_btn, self.del_btn, self.batch_edit_btn, QLabel("|"),
+                  self.filter_all_btn, self.filter_stock_btn, self.filter_low_btn, self.filter_out_btn]:
             toolbar.addWidget(w)
         toolbar.addStretch()
         toolbar.addWidget(self.search_edit)
@@ -203,7 +245,7 @@ class MainWindow(QMainWindow):
         
         self.parts_table = PartsTableWidget(self.db)
         self.parts_table.selection_changed.connect(self._on_selection_changed)
-        self.parts_table.double_clicked.connect(self._view_part)          # двойной клик -> просмотр
+        self.parts_table.double_clicked.connect(self._view_part)
         self.parts_table.selection_changed_batch.connect(self._on_batch_selection_changed)
         self.main_splitter.addWidget(self.parts_table)
         
@@ -237,7 +279,6 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
         self._update_status()
 
-        # Горячие клавиши
         QShortcut(QKeySequence("Ctrl+N"), self).activated.connect(self._add_part)
         QShortcut(QKeySequence("Ctrl+E"), self).activated.connect(self._edit_part)
         QShortcut(QKeySequence("Del"), self).activated.connect(self._delete_part)
@@ -364,7 +405,7 @@ class MainWindow(QMainWindow):
         cat_text = "Все" if self.selected_category_id is None else "Категория"
         self.status.showMessage(f"📦 {s['total_parts']} | 💰 {s['total_value']:.0f}₽ | 📍 {loc} | 🏷 {cat_text}")
 
-    # ---- Добавление, редактирование, удаление, импорт ----
+    # ---- Добавление, редактирование, удаление, импорт, экспорт, пакетное редактирование ----
     def _add_part(self):
         dialog = PartDialog(self, db=self.db, start_depth=self.selector_tree_depth)
         if dialog.exec():
@@ -386,11 +427,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "⚠️", "Выберите строку")
 
     def _view_part(self, part_id):
-        """Открывает окно просмотра детали (только чтение)"""
         part = self.db.get_part(part_id)
         if part:
             viewer = PartViewer(part, self.db, self)
-            viewer.show()   # немодальное окно
+            viewer.show()
 
     def _delete_part(self):
         pid = self.parts_table.get_selected_part_id()
@@ -412,7 +452,42 @@ class MainWindow(QMainWindow):
             except Exception as e: 
                 QMessageBox.critical(self, "Ошибка", str(e))
 
-    # ---- Пакетное редактирование ----
+    def _export_data(self, format_type="csv"):
+        cat_id = self.selected_category_id
+        filter_type = self.current_filter
+        loc_path = self.selected_location_path
+        parts = self.db.get_all_parts_filtered(category_id=cat_id, filter_type=filter_type, location_path=loc_path)
+        categories = {c[0]: c[1] for c in self.db.get_categories()}
+        for p in parts:
+            p['category_name'] = categories.get(p.get('category_id'), '')
+            p['description'] = p.get('notes', '')
+            if p.get('value_numeric') is None:
+                p['value_numeric'] = ''
+        if not parts:
+            QMessageBox.information(self, "Экспорт", "Нет данных для экспорта.")
+            return
+
+        if format_type == "csv":
+            file_path, _ = QFileDialog.getSaveFileName(self, "Сохранить CSV", "", "CSV файл (*.csv)")
+            if not file_path:
+                return
+            try:
+                from utils.exporter import export_to_csv
+                count = export_to_csv(parts, Path(file_path))
+                QMessageBox.information(self, "Экспорт", f"Экспортировано {count} деталей в CSV.")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить CSV:\n{e}")
+        else:
+            file_path, _ = QFileDialog.getSaveFileName(self, "Сохранить Excel", "", "Excel файл (*.xlsx)")
+            if not file_path:
+                return
+            try:
+                from utils.exporter import export_to_excel
+                count = export_to_excel(parts, Path(file_path))
+                QMessageBox.information(self, "Экспорт", f"Экспортировано {count} деталей в Excel.")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить Excel:\n{e}")
+
     def _on_batch_selection_changed(self, count):
         self.batch_edit_btn.setEnabled(count >= 2)
 
@@ -425,3 +500,87 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self._refresh_all()
             QMessageBox.information(self, "Готово", f"Обновлено {len(part_ids)} деталей.")
+
+    # ---- Резервное копирование через Яндекс.Диск ----
+    def _get_yandex_token(self):
+        token = self.saved_settings.get('yandex_token')
+        if not token:
+            from utils.cloud_backup import YandexDiskBackup
+            token = YandexDiskBackup.request_token_interactive(self)
+            if token:
+                self.saved_settings['yandex_token'] = token
+                self._save_token(token)
+        return token
+
+    def _backup_to_cloud(self):
+        token = self._get_yandex_token()
+        if not token:
+            QMessageBox.warning(self, "Нет токена", "Не удалось получить токен. Резервное копирование отменено.")
+            return
+
+        from utils.cloud_backup import YandexDiskBackup
+        backup = YandexDiskBackup(token)
+        if not backup.is_authenticated():
+            QMessageBox.critical(self, "Ошибка", "Не удалось авторизоваться. Проверьте токен.")
+            return
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            zip_path = backup.create_backup_zip()
+            if backup.upload_backup(zip_path):
+                QMessageBox.information(self, "Готово", "Резервная копия успешно загружена в Яндекс.Диск.\nПуть: /RadioPartsDB/backups")
+            else:
+                QMessageBox.critical(self, "Ошибка", "Не удалось загрузить архив.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при создании архива: {e}")
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def _restore_from_cloud(self):
+        reply = QMessageBox.warning(self, "Восстановление данных",
+            "⚠️ ВНИМАНИЕ! Восстановление заменит текущую базу данных, изображения и даташиты.\n\n"
+            "Перед восстановлением закройте программу (это окно) и убедитесь, что RadioPartsDB не запущена.\n"
+            "Если программа открыта, закройте её сейчас.\n\n"
+            "Продолжить?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
+        token = self._get_yandex_token()
+        if not token:
+            QMessageBox.warning(self, "Нет токена", "Не удалось получить токен.")
+            return
+
+        from utils.cloud_backup import YandexDiskBackup
+        backup = YandexDiskBackup(token)
+        if not backup.is_authenticated():
+            QMessageBox.critical(self, "Ошибка", "Авторизация не удалась.")
+            return
+
+        backups = backup.list_backups()
+        if not backups:
+            QMessageBox.information(self, "Нет копий", "В облаке не найдено резервных копий.")
+            return
+
+        latest = backups[0]
+        reply = QMessageBox.question(self, "Подтверждение",
+            f"Будет восстановлена копия:\n{latest['name']}\nДата: {latest['modified']}\n\nПродолжить?",
+            QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            import tempfile
+            zip_path = Path(tempfile.gettempdir()) / latest['name']
+            if backup.download_backup(latest['path'], zip_path):
+                if backup.restore_from_zip(zip_path):
+                    QMessageBox.information(self, "Успешно", "Данные восстановлены. Перезапустите программу.")
+                else:
+                    QMessageBox.critical(self, "Ошибка", "Не удалось восстановить данные.")
+            else:
+                QMessageBox.critical(self, "Ошибка", "Не удалось скачать архив.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка: {e}")
+        finally:
+            QApplication.restoreOverrideCursor()

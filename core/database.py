@@ -59,6 +59,7 @@ class Database:
             if current_version >= CURRENT_SCHEMA_VERSION:
                 logger.info(f"✅ Схема БД актуальна (версия {current_version})")
                 self._ensure_dictionaries()
+                self._create_data_dirs()
                 return
 
             logger.info(f"🔄 Обновление схемы БД: {current_version} -> {CURRENT_SCHEMA_VERSION}")
@@ -80,6 +81,14 @@ class Database:
                     raise RuntimeError(f"Миграция v{version} провалилась.") from e
             logger.info(f"🎉 Схема БД успешно обновлена до версии {CURRENT_SCHEMA_VERSION}")
             self._ensure_dictionaries()
+            self._create_data_dirs()
+
+    def _create_data_dirs(self):
+        """Создаёт папки для изображений и даташитов, если их нет."""
+        from config import DATA_DIR
+        (DATA_DIR / "images").mkdir(exist_ok=True)
+        (DATA_DIR / "datasheets").mkdir(exist_ok=True)
+        logger.info("✅ Папки images и datasheets созданы (если их не было)")
 
     def _ensure_dictionaries(self):
         with self.get_cursor() as cursor:
@@ -273,7 +282,6 @@ class Database:
             cursor.execute("INSERT OR IGNORE INTO dictionaries (type, value) VALUES (?, ?)", (dict_type, value))
 
     def create_part(self, data: Dict[str, Any]) -> int:
-        # Сохраняем новые значения в словари
         if data.get('part_type'):
             self.add_dictionary_value('part_type', data['part_type'])
         if data.get('manufacturer'):
@@ -302,7 +310,6 @@ class Database:
             return row[0] if row else None
 
     def update_part(self, part_id: int, data: Dict[str, Any]):
-        # Сохраняем новые значения в словари
         if data.get('part_type'):
             self.add_dictionary_value('part_type', data['part_type'])
         if data.get('manufacturer'):
