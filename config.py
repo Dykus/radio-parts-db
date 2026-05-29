@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "RadioPartsDB"
-APP_VERSION = "0.21.3"
+APP_VERSION = "0.22.0"
 
 # Пути к данным
 BASE_DIR = Path(__file__).parent
