@@ -147,17 +147,28 @@ class BatchEditDialog(QDialog):
 
     def _on_cat_combo_changed(self, idx):
         if self.cat_combo.currentData() == "select":
+            # Пользователь выбрал "Выбрать категорию..."
             from .category_selector import CategorySelectorDialog
             dialog = CategorySelectorDialog(self, db=self.db, start_depth=1)
             dialog.category_selected.connect(self._set_category)
             dialog.exec()
-            self.cat_combo.setCurrentIndex(0)
-        # Если выбрано "Не менять" – скрываем поле пути
-        self.cat_path_edit.setVisible(False)
+            # После закрытия диалога не сбрасываем индекс, т.к. _set_category уже установил нужный пункт
+            # Если же пользователь закрыл диалог без выбора, то возвращаемся на "— Не менять —"
+            if self.cat_combo.currentData() == "select":
+                self.cat_combo.setCurrentIndex(0)
 
     def _set_category(self, path):
-        self.cat_path_edit.setText(path)
-        self.cat_path_edit.setVisible(True)
+        # Добавляем выбранную категорию в comboBox как отдельный пункт, если ещё нет
+        existing_index = -1
+        for i in range(self.cat_combo.count()):
+            if self.cat_combo.itemData(i) == path:
+                existing_index = i
+                break
+        if existing_index == -1:
+            self.cat_combo.insertItem(2, f"📁 {path}", path)
+            existing_index = 2
+        self.cat_combo.setCurrentIndex(existing_index)
+        self.cat_path_edit.setVisible(False)
 
     def _on_loc_combo_changed(self, idx):
         if self.loc_combo.currentData() == "set":
@@ -166,13 +177,14 @@ class BatchEditDialog(QDialog):
             self.loc_edit.setVisible(False)
 
     def _apply(self):
-        # Собираем обновления
         updates = {}
         errors = []
 
         # Категория
-        if self.cat_path_edit.isVisible() and self.cat_path_edit.text():
-            cat_path = self.cat_path_edit.text().strip()
+        cat_data = self.cat_combo.currentData()
+        if cat_data and cat_data != "select" and cat_data is not None:
+            # cat_data — это строка пути категории
+            cat_path = cat_data
             cat_id = self._get_category_id_from_path(cat_path)
             if cat_id is None:
                 errors.append(f"Категория '{cat_path}' не найдена в базе.")
