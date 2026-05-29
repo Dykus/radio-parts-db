@@ -1,3 +1,4 @@
+# utils/exporter.py
 import csv
 import logging
 from pathlib import Path
@@ -11,10 +12,12 @@ def export_to_csv(parts: List[Dict[str, Any]], file_path: Path) -> int:
     """Экспорт списка деталей в CSV (utf-8-sig, разделитель ;)."""
     if not parts:
         return 0
-    fieldnames = ['id', 'name', 'category', 'part_type', 'value_numeric', 'value_unit',
-                  'package', 'diameter_mm', 'height_mm', 'lead_pitch_mm', 'lead_diameter_mm',
-                  'quantity', 'price', 'location', 'status', 'manufacturer', 'part_number',
-                  'revision_date', 'description', 'image_path', 'datasheet_path']
+    fieldnames = [
+        'id', 'name', 'category', 'part_type', 'value_numeric', 'value_unit',
+        'package', 'diameter_mm', 'height_mm', 'lead_pitch_mm', 'lead_diameter_mm',
+        'quantity', 'price', 'location', 'status', 'manufacturer', 'part_number',
+        'revision_date', 'description', 'image_path', 'image_path_2', 'image_path_3', 'datasheet_path'
+    ]
     for p in parts:
         if 'category_name' not in p:
             p['category_name'] = p.get('category', '')
@@ -36,10 +39,12 @@ def export_to_excel(parts: List[Dict[str, Any]], file_path: Path) -> int:
     ws = wb.active
     ws.title = "RadioPartsDB"
 
-    headers = ['ID', 'Наименование', 'Категория', 'Тип детали', 'Номинал числовой', 'Единица',
-               'Корпус', 'Диаметр (мм)', 'Высота (мм)', 'Шаг выводов (мм)', 'Толщина выводов (мм)',
-               'Количество', 'Цена', 'Место хранения', 'Состояние', 'Производитель', 'Артикул',
-               'Дата ревизии', 'Заметки', 'Изображение', 'Даташит']
+    headers = [
+        'ID', 'Наименование', 'Категория', 'Тип детали', 'Номинал числовой', 'Единица',
+        'Корпус', 'Диаметр (мм)', 'Высота (мм)', 'Шаг выводов (мм)', 'Толщина выводов (мм)',
+        'Количество', 'Цена', 'Место хранения', 'Состояние', 'Производитель', 'Артикул',
+        'Дата ревизии', 'Заметки', 'Изображение 1', 'Изображение 2', 'Изображение 3', 'Даташит'
+    ]
     ws.append(headers)
     for col in range(1, len(headers)+1):
         cell = ws.cell(row=1, column=col)
@@ -68,6 +73,8 @@ def export_to_excel(parts: List[Dict[str, Any]], file_path: Path) -> int:
             p.get('revision_date', ''),
             p.get('notes', ''),
             p.get('image_path', ''),
+            p.get('image_path_2', ''),
+            p.get('image_path_3', ''),
             p.get('datasheet_path', ''),
         ]
         ws.append(row)

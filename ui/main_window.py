@@ -2,7 +2,8 @@
 import os
 import logging
 import json
-import tempfile
+import shutil
+import uuid
 from pathlib import Path
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QShortcut, QKeySequence
+from PIL import Image
 
 from ui.dialogs.part_dialog import PartDialog
 from ui.dialogs.batch_edit_dialog import BatchEditDialog
@@ -19,7 +21,7 @@ from ui.dialogs.part_viewer import PartViewer
 from ui.widgets.parts_table import PartsTableWidget
 from ui.widgets.info_panel import InfoPanelWidget
 from ui.widgets.category_tree import CategoryTreeWidget
-from config import APP_NAME, APP_VERSION
+from config import APP_NAME, APP_VERSION, DATA_DIR
 
 logger = logging.getLogger(__name__)
 from core.database import Database
@@ -36,27 +38,27 @@ class MainWindow(QMainWindow):
         self.current_filter = "all"
         self.selected_location_path = None
         self.selected_category_id = None
-
+        
         self._load_window_settings()
         self.category_tree_depth = self.saved_settings.get('category_tree_depth', 0)
         self.location_tree_depth = self.saved_settings.get('location_tree_depth', 0)
         self.selector_tree_depth = self.saved_settings.get('selector_tree_depth', 0)
-
+        
         self._init_ui()
         self._apply_saved_settings()
-        self._check_pending_restore()   # проверка отложенного восстановления
+        self._check_pending_restore()
         self._refresh_all()
-
+    
     def _load_window_settings(self):
         if os.path.exists(SETTINGS_FILE):
             try:
-                with open(SETTINGS_FILE, 'r') as f:
+                with open(SETTINGS_FILE, 'r') as f: 
                     self.saved_settings = json.load(f)
                 logger.info(f"✅ Загружены настройки из {SETTINGS_FILE}")
-            except Exception as e:
+            except Exception as e: 
                 logger.warning(f"Ошибка загрузки настроек: {e}")
                 self.saved_settings = {}
-        else:
+        else: 
             self.saved_settings = {}
 
     def _save_window_settings(self):
@@ -71,10 +73,8 @@ class MainWindow(QMainWindow):
                 'location_tree_depth': self.location_tree_depth,
                 'selector_tree_depth': self.selector_tree_depth
             }
-            # Добавляем токен, если он есть в saved_settings
             if 'yandex_token' in self.saved_settings:
                 settings['yandex_token'] = self.saved_settings['yandex_token']
-            # Добавляем флаг отложенного восстановления, если он есть
             if 'pending_restore' in self.saved_settings:
                 settings['pending_restore'] = self.saved_settings['pending_restore']
             if 'restore_zip_path' in self.saved_settings:
@@ -136,13 +136,13 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         menubar = self.menuBar()
-
+        
         file_menu = menubar.addMenu("Файл")
-
+        
         import_action = QAction("📥 Импорт CSV", self)
         import_action.triggered.connect(self._import_csv)
         file_menu.addAction(import_action)
-
+        
         export_menu = QMenu("📤 Экспорт", self)
         export_csv_action = QAction("CSV файл (*.csv)", self)
         export_csv_action.triggered.connect(lambda: self._export_data("csv"))
@@ -151,34 +151,34 @@ class MainWindow(QMainWindow):
         export_menu.addAction(export_csv_action)
         export_menu.addAction(export_excel_action)
         file_menu.addMenu(export_menu)
-
+        
         file_menu.addSeparator()
-
+        
         backup_action = QAction("📤 Выгрузить резервную копию в Яндекс.Диск", self)
         backup_action.triggered.connect(self._backup_to_cloud)
         file_menu.addAction(backup_action)
-
+        
         restore_action = QAction("📥 Восстановить из резервной копии (Яндекс.Диск)", self)
         restore_action.triggered.connect(self._restore_from_cloud)
         file_menu.addAction(restore_action)
-
+        
         file_menu.addSeparator()
-
+        
         settings_action = QAction("⚙️ Настройки", self)
         settings_action.triggered.connect(self._open_settings)
         file_menu.addAction(settings_action)
-
+        
         file_menu.addSeparator()
-
+        
         exit_action = QAction("🚪 Выход", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-
+        
         help_menu = menubar.addMenu("Помощь")
         help_action = QAction("❓ Помощь", self)
         help_action.triggered.connect(self._open_help)
         help_menu.addAction(help_action)
-
+        
         about_action = QAction("ℹ️ О программе", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
@@ -186,20 +186,20 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
-
+        
         toolbar = QHBoxLayout()
-
+        
         self.add_btn = QPushButton("➕ Добавить")
         self.add_btn.clicked.connect(self._add_part)
         self.edit_btn = QPushButton("✏️ Редактировать")
         self.edit_btn.clicked.connect(self._edit_part)
         self.del_btn = QPushButton("🗑️ Удалить")
         self.del_btn.clicked.connect(self._delete_part)
-
+        
         self.batch_edit_btn = QPushButton("✏️ Пакетное редактирование")
         self.batch_edit_btn.setEnabled(False)
         self.batch_edit_btn.clicked.connect(self._batch_edit)
-
+        
         self.filter_all_btn = QPushButton(" Все")
         self.filter_all_btn.setCheckable(True)
         self.filter_all_btn.setChecked(True)
@@ -213,27 +213,27 @@ class MainWindow(QMainWindow):
         self.filter_out_btn = QPushButton("❌ Нет")
         self.filter_out_btn.setCheckable(True)
         self.filter_out_btn.clicked.connect(lambda: self._apply_filter("out_of_stock"))
-
+        
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("🔍 Поиск...")
         self.search_edit.textChanged.connect(self._filter_table)
-
+        
         for w in [self.add_btn, self.edit_btn, self.del_btn, self.batch_edit_btn, QLabel("|"),
                   self.filter_all_btn, self.filter_stock_btn, self.filter_low_btn, self.filter_out_btn]:
             toolbar.addWidget(w)
         toolbar.addStretch()
         toolbar.addWidget(self.search_edit)
         main_layout.addLayout(toolbar)
-
+        
         self.main_splitter = QSplitter(Qt.Horizontal)
-
+        
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         cat_depth_label = QLabel("📂 Глубина категорий:")
         cat_depth_label.setStyleSheet("font-weight: bold; font-size: 10px;")
         left_layout.addWidget(cat_depth_label)
-
+        
         self.category_depth_inline = QComboBox()
         self.category_depth_inline.addItem("📁 Полностью свёрнуто", 0)
         self.category_depth_inline.addItem(" Корни + 1 уровень", 1)
@@ -243,26 +243,26 @@ class MainWindow(QMainWindow):
         self.category_depth_inline.setCurrentIndex(self.category_depth_inline.findData(self.category_tree_depth))
         self.category_depth_inline.currentIndexChanged.connect(self._on_category_depth_changed)
         left_layout.addWidget(self.category_depth_inline)
-
+        
         self.category_tree = CategoryTreeWidget(self.db, start_depth=self.category_tree_depth)
         self.category_tree.category_selected.connect(self._on_category_selected)
         self.category_tree.categories_changed.connect(self._refresh_all)
         left_layout.addWidget(self.category_tree)
         self.main_splitter.addWidget(left_panel)
-
+        
         self.parts_table = PartsTableWidget(self.db)
         self.parts_table.selection_changed.connect(self._on_selection_changed)
         self.parts_table.double_clicked.connect(self._view_part)
         self.parts_table.selection_changed_batch.connect(self._on_batch_selection_changed)
         self.main_splitter.addWidget(self.parts_table)
-
+        
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         loc_depth_label = QLabel("📍 Глубина навигатора:")
         loc_depth_label.setStyleSheet("font-weight: bold; font-size: 10px;")
         right_layout.addWidget(loc_depth_label)
-
+        
         self.location_depth_inline = QComboBox()
         self.location_depth_inline.addItem("📁 Полностью свёрнуто", 0)
         self.location_depth_inline.addItem("📂 Корни + 1 уровень", 1)
@@ -272,16 +272,16 @@ class MainWindow(QMainWindow):
         self.location_depth_inline.setCurrentIndex(self.location_depth_inline.findData(self.location_tree_depth))
         self.location_depth_inline.currentIndexChanged.connect(self._on_location_depth_changed)
         right_layout.addWidget(self.location_depth_inline)
-
+        
         self.right_panel = InfoPanelWidget(self.db, start_depth=self.location_tree_depth)
         self.right_panel.location_clicked.connect(self._filter_by_location)
         self.right_panel.depth_changed.connect(self._on_location_depth_from_widget)
         right_layout.addWidget(self.right_panel)
         self.main_splitter.addWidget(right_panel)
-
+        
         self.main_splitter.setSizes([250, 700, 300])
         main_layout.addWidget(self.main_splitter)
-
+        
         self.status = QStatusBar()
         self.setStatusBar(self.status)
         self._update_status()
@@ -417,13 +417,74 @@ class MainWindow(QMainWindow):
         cat_text = "Все" if self.selected_category_id is None else "Категория"
         self.status.showMessage(f"📦 {s['total_parts']} | 💰 {s['total_value']:.0f}₽ | 📍 {loc} | 🏷 {cat_text}")
 
-    # ---- Добавление, редактирование, удаление, импорт, экспорт, пакетное редактирование ----
+    # ---- Обработка изображений ----
+    def _process_image(self, src_path, part_id, index):
+        """Копирует/сжимает одно изображение, возвращает относительный путь (относительно DATA_DIR)."""
+        images_dir = DATA_DIR / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Генерируем уникальное имя
+        ext = Path(src_path).suffix.lower()
+        dest_name = f"part_{part_id}_img_{index}_{uuid.uuid4().hex[:8]}.webp"
+        dest_path = images_dir / dest_name
+        
+        try:
+            from PIL import Image
+            img = Image.open(src_path)
+            # Конвертация в RGB (если RGBA)
+            if img.mode in ('RGBA', 'LA', 'P'):
+                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                img = rgb_img
+            # Масштабирование до 1024 по длинной стороне
+            max_size = 1024
+            if max(img.size) > max_size:
+                ratio = max_size / max(img.size)
+                new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
+                img = img.resize(new_size, Image.LANCZOS)
+            # Сохранение как WebP
+            img.save(dest_path, 'WEBP', quality=85, optimize=True)
+            return f"images/{dest_name}"
+        except Exception as e:
+            logger.error(f"Ошибка обработки изображения {src_path}: {e}")
+            # При ошибке просто копируем оригинал
+            fallback_name = f"part_{part_id}_img_{index}_{Path(src_path).name}"
+            fallback_path = images_dir / fallback_name
+            shutil.copy2(src_path, fallback_path)
+            return f"images/{fallback_name}"
+
+    def _save_images_for_part(self, part_id, image_files):
+        """Сохраняет изображения для детали, возвращает словарь с путями image_path, image_path_2, image_path_3."""
+        result = {'image_path': None, 'image_path_2': None, 'image_path_3': None}
+        for i, file_path in enumerate(image_files[:3]):
+            if file_path and Path(file_path).exists():
+                rel_path = self._process_image(file_path, part_id, i+1)
+                result[f'image_path_{i+1}' if i > 0 else 'image_path'] = rel_path
+        return result
+
+    # ---- Добавление, редактирование, удаление, импорт, экспорт ----
     def _add_part(self):
         dialog = PartDialog(self, db=self.db, start_depth=self.selector_tree_depth)
         if dialog.exec():
-            self.db.create_part(dialog.get_data())
-            self._refresh_all()
-            QMessageBox.information(self, "✅", "Добавлено!")
+            data = dialog.get_data()
+            # Убираем временные image_files из data, они обрабатываются отдельно
+            image_files = data.pop('image_files', [])
+            # Создаём деталь без изображений
+            part_id = self.db.create_part(data)
+            if part_id:
+                # Обрабатываем изображения
+                if image_files:
+                    img_paths = self._save_images_for_part(part_id, image_files)
+                    # Обновляем запись с путями изображений
+                    update_data = {k: v for k, v in img_paths.items() if v}
+                    if update_data:
+                        part = self.db.get_part(part_id)
+                        part.update(update_data)
+                        self.db.update_part(part_id, part)
+                self._refresh_all()
+                QMessageBox.information(self, "✅", "Деталь добавлена!")
+            else:
+                QMessageBox.critical(self, "Ошибка", "Не удалось создать деталь.")
 
     def _edit_part(self):
         pid = self.parts_table.get_selected_part_id()
@@ -432,9 +493,20 @@ class MainWindow(QMainWindow):
             if part:
                 dialog = PartDialog(self, part_data=part, db=self.db, start_depth=self.selector_tree_depth)
                 if dialog.exec():
-                    self.db.update_part(pid, dialog.get_data())
+                    data = dialog.get_data()
+                    image_files = data.pop('image_files', [])
+                    # Обновляем основные поля
+                    self.db.update_part(pid, data)
+                    # Обрабатываем изображения, если были добавлены новые
+                    if image_files:
+                        img_paths = self._save_images_for_part(pid, image_files)
+                        update_data = {k: v for k, v in img_paths.items() if v}
+                        if update_data:
+                            part_updated = self.db.get_part(pid)
+                            part_updated.update(update_data)
+                            self.db.update_part(pid, part_updated)
                     self._refresh_all()
-                    QMessageBox.information(self, "✅", "Обновлено!")
+                    QMessageBox.information(self, "✅", "Деталь обновлена!")
         else:
             QMessageBox.warning(self, "⚠️", "Выберите строку")
 
@@ -549,10 +621,8 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
 
     def _check_pending_restore(self):
-        """Проверяет, есть ли отложенное восстановление, и выполняет его."""
         pending = self.saved_settings.get('pending_restore')
         if pending:
-            # Удаляем флаг, чтобы при повторном запуске не пытаться снова
             self.saved_settings.pop('pending_restore', None)
             restore_zip_path = self.saved_settings.pop('restore_zip_path', None)
             self._save_window_settings()
@@ -582,14 +652,12 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Ошибка", f"Ошибка восстановления: {e}")
             finally:
                 QApplication.restoreOverrideCursor()
-                # Удаляем временный архив
                 try:
                     Path(restore_zip_path).unlink(missing_ok=True)
                 except Exception:
                     pass
 
     def _restore_from_cloud(self):
-        """Скачивает последний архив, сохраняет информацию и закрывает программу."""
         token = self._get_yandex_token()
         if not token:
             QMessageBox.warning(self, "Нет токена", "Не удалось получить токен.")
@@ -615,7 +683,6 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.Yes:
             return
 
-        # Скачиваем архив во временную папку
         zip_path = Path(tempfile.gettempdir()) / latest['name']
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
@@ -628,11 +695,9 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
 
-        # Сохраняем информацию об отложенном восстановлении
         self.saved_settings['pending_restore'] = True
         self.saved_settings['restore_zip_path'] = str(zip_path)
         self._save_window_settings()
 
-        # Закрываем приложение
         QMessageBox.information(self, "Восстановление", "Программа будет закрыта. При следующем запуске данные будут восстановлены.")
         self.close()

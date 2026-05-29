@@ -7,7 +7,7 @@ from pathlib import Path
 from contextlib import contextmanager
 from typing import Optional, List, Dict, Any
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 logger = logging.getLogger(__name__)
 
 class Database:
@@ -19,6 +19,7 @@ class Database:
             2: self._migration_v2_russian_statuses,
             3: self._migration_v3_add_nominal_fields,
             4: self._migration_v4_add_capacitor_dimensions,
+            5: self._migration_v5_multiple_images,
         }
 
     def connect(self):
@@ -185,6 +186,14 @@ class Database:
         cursor.execute("ALTER TABLE parts ADD COLUMN lead_diameter_mm REAL")
         logger.info("✅ Добавлены поля диаметр, высота, шаг выводов, толщина выводов")
 
+    def _migration_v5_multiple_images(self, cursor):
+        # Добавляем поля для второго и третьего изображения
+        cursor.execute("ALTER TABLE parts ADD COLUMN image_path_2 TEXT")
+        cursor.execute("ALTER TABLE parts ADD COLUMN image_path_3 TEXT")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_image2 ON parts(image_path_2)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_parts_image3 ON parts(image_path_3)")
+        logger.info("✅ Добавлены поля image_path_2, image_path_3 для нескольких изображений")
+
     # ==================== КАТЕГОРИИ ====================
     def _get_all_descendant_ids(self, cat_id: int, cursor) -> List[int]:
         descendants = [cat_id]
@@ -232,7 +241,7 @@ class Database:
     def get_all_parts_filtered(self, category_id=None, filter_type="all", location_path=None) -> List[Dict[str, Any]]:
         with self.get_cursor() as cursor:
             query = """SELECT id, name, part_type, package, quantity, price, location, status,
-                              value_numeric, value_unit, value_raw, category_id, image_path,
+                              value_numeric, value_unit, value_raw, category_id, image_path, image_path_2, image_path_3,
                               diameter_mm, height_mm, lead_pitch_mm, lead_diameter_mm
                        FROM parts WHERE 1=1"""
             params = []
@@ -289,14 +298,16 @@ class Database:
         with self.get_cursor() as cursor:
             cursor.execute("""INSERT INTO parts (
                 name, category_id, part_type, package, manufacturer, part_number,
-                quantity, price, location, status, image_path, datasheet_path, notes, revision_date,
+                quantity, price, location, status, image_path, image_path_2, image_path_3,
+                datasheet_path, notes, revision_date,
                 value_numeric, value_unit, value_raw,
                 diameter_mm, height_mm, lead_pitch_mm, lead_diameter_mm
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
                 (data['name'], data.get('category_id'), data.get('part_type'), data.get('package'),
                  data.get('manufacturer'), data.get('part_number'), data.get('quantity', 0),
                  data.get('price', 0), data.get('location'), data.get('status', 'Новое'),
-                 data.get('image_path'), data.get('datasheet_path'), data.get('notes'),
+                 data.get('image_path'), data.get('image_path_2'), data.get('image_path_3'),
+                 data.get('datasheet_path'), data.get('notes'),
                  data.get('revision_date'), data.get('value_numeric'), data.get('value_unit'),
                  data.get('value_raw'),
                  data.get('diameter_mm'), data.get('height_mm'), data.get('lead_pitch_mm'), data.get('lead_diameter_mm')))
@@ -318,7 +329,7 @@ class Database:
             cursor.execute("""
                 UPDATE parts SET
                     name=?, category_id=?, part_type=?, package=?, manufacturer=?, part_number=?,
-                    quantity=?, price=?, location=?, status=?, image_path=?, 
+                    quantity=?, price=?, location=?, status=?, image_path=?, image_path_2=?, image_path_3=?,
                     datasheet_path=?, notes=?, revision_date=?, updated_at=CURRENT_TIMESTAMP,
                     value_numeric=?, value_unit=?, value_raw=?,
                     diameter_mm=?, height_mm=?, lead_pitch_mm=?, lead_diameter_mm=?
@@ -327,7 +338,7 @@ class Database:
                 data['name'], data.get('category_id'), data.get('part_type'),
                 data.get('package'), data.get('manufacturer'), data.get('part_number'),
                 data.get('quantity', 0), data.get('price', 0), data.get('location'),
-                data.get('status', 'Новое'), data.get('image_path'),
+                data.get('status', 'Новое'), data.get('image_path'), data.get('image_path_2'), data.get('image_path_3'),
                 data.get('datasheet_path'), data.get('notes'), data.get('revision_date'),
                 data.get('value_numeric'), data.get('value_unit'), data.get('value_raw'),
                 data.get('diameter_mm'), data.get('height_mm'), data.get('lead_pitch_mm'), data.get('lead_diameter_mm'),

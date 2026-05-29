@@ -13,9 +13,14 @@ class PartsTableModel(QStandardItemModel):
         self.setHorizontalHeaderLabels(["ID", "Наименование", "Тип", "Корпус", "Кол-во", "Цена", "Место", "Состояние"])
         self.load_data()
 
-    def _format_package_with_dimensions(self, package, dims):
+    def _has_any_image(self, part: dict) -> bool:
+        """Проверяет наличие хотя бы одного изображения (из трёх)."""
+        return bool(part.get('image_path') or part.get('image_path_2') or part.get('image_path_3'))
+
+    def _format_package_with_dimensions(self, package, dims, has_photo):
         if not dims:
-            return package or ''
+            pkg_text = package or ''
+            return f"📷 {pkg_text}" if has_photo and pkg_text else (pkg_text if pkg_text else ('📷' if has_photo else ''))
         parts = []
         if package:
             parts.append(package)
@@ -33,7 +38,10 @@ class PartsTableModel(QStandardItemModel):
             parts.append(f"шаг {pitch}мм")
         if lead_d > 0:
             parts.append(f"вывод {lead_d}мм")
-        return ' / '.join(parts) if parts else (package or '')
+        result = ' / '.join(parts) if parts else (package or '')
+        if has_photo:
+            result = f"📷 {result}"
+        return result
 
     def load_data(self, category_id=None, filter_type="all", location_path=None):
         self.removeRows(0, self.rowCount())
@@ -49,7 +57,7 @@ class PartsTableModel(QStandardItemModel):
         }
         
         for p in parts:
-            has_photo = bool(p.get('image_path') and p['image_path'].strip())
+            has_photo = self._has_any_image(p)
             package_text = p.get('package') or ''
             dims = {
                 'diameter_mm': p.get('diameter_mm'),
@@ -57,9 +65,7 @@ class PartsTableModel(QStandardItemModel):
                 'lead_pitch_mm': p.get('lead_pitch_mm'),
                 'lead_diameter_mm': p.get('lead_diameter_mm'),
             }
-            display_package = self._format_package_with_dimensions(package_text, dims)
-            if has_photo:
-                display_package = f"📷 {display_package}"
+            display_package = self._format_package_with_dimensions(package_text, dims, has_photo)
             
             items = [
                 QStandardItem(str(p['id'])),
@@ -128,7 +134,6 @@ class PartsTableWidget(QWidget):
         self.table_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
-        # Принудительное выделение строк (перебивает любые цвета модели)
         self.table_view.setStyleSheet("""
             QTableView::item:selected {
                 background-color: #3399ff !important;

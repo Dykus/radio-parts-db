@@ -1,13 +1,27 @@
 # ui/dialogs/part_dialog.py
 import re
 import logging
+import uuid
+import shutil
+from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox,
     QDateTimeEdit, QTextEdit, QDialogButtonBox, QMessageBox, QFileDialog,
-    QWidget, QHBoxLayout, QPushButton
+    QWidget, QHBoxLayout, QPushButton, QLabel, QScrollArea, QFrame, QVBoxLayout
 )
 from PySide6.QtCore import Qt, QDate
+from PySide6.QtGui import QPixmap
 from ui.dialogs.category_selector import CategorySelectorDialog
+from config import DATA_DIR
+
+# Попытка импорта Pillow для обработки изображений
+try:
+    from PIL import Image
+    PILLOW_AVAILABLE = True
+except ImportError:
+    PILLOW_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("Pillow не установлен. Сжатие изображений отключено. Установите: pip install Pillow")
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +32,9 @@ class PartDialog(QDialog):
         self.part_data = part_data
         self.start_depth = start_depth
         self.setWindowTitle("✏️ Редактирование компонента")
-        self.setMinimumWidth(650)
+        self.setMinimumWidth(700)
+        self.selected_image_paths = [None, None, None]  # для трёх изображений (временные пути при редактировании)
+        self.new_image_files = []  # список (index, file_path) для новых изображений при сохранении
         self._init_ui()
         if part_data:
             self._fill_form(part_data)
@@ -161,17 +177,24 @@ class PartDialog(QDialog):
         location_layout.addWidget(self.location_section_combo)
         layout.addRow("Место хранения", location_widget)
 
-        # Изображение
-        image_widget = QWidget()
-        image_layout = QHBoxLayout(image_widget)
-        image_layout.setContentsMargins(0, 0, 0, 0)
-        image_layout.setSpacing(5)
-        self.image_path_edit = QLineEdit()
-        self.image_btn = QPushButton("🖼️ Обзор...")
-        self.image_btn.clicked.connect(lambda: self._browse_file(self.image_path_edit, "Images (*.png *.jpg *.jpeg *.gif)"))
-        image_layout.addWidget(self.image_path_edit)
-        image_layout.addWidget(self.image_btn)
-        layout.addRow("Изображение", image_widget)
+        # --- Изображения (до 3) ---
+        images_group = QWidget()
+        images_layout = QVBoxLayout(images_group)
+        images_layout.setContentsMargins(0, 0, 0, 0)
+        images_layout.setSpacing(5)
+
+        self.image_btn = QPushButton("📷 Добавить изображения (до 3)")
+        self.image_btn.clicked.connect(self._add_images)
+        images_layout.addWidget(self.image_btn)
+
+        self.images_container = QWidget()
+        self.images_layout = QHBoxLayout(self.images_container)
+        self.images_layout.setSpacing(10)
+        self.images_layout.setContentsMargins(0, 0, 0, 0)
+        self.image_widgets = []  # список (frame с превью, кнопка удаления, путь)
+        images_layout.addWidget(self.images_container)
+
+        layout.addRow("Изображения", images_group)
 
         # Даташит
         datasheet_widget = QWidget()
@@ -212,7 +235,107 @@ class PartDialog(QDialog):
         # Загрузка выпадающих списков
         self._load_comboboxes()
 
-    # ---- Загрузка списков ----
+    def _add_images(self):
+        """Выбор до 3 изображений, показ превью."""
+        current_count = len(self.image_widgets)
+        max_new = 3 - current_count
+        if max_new <= 0:
+            QMessageBox.warning(self, "Лимит", "Максимум 3 изображения для одной детали.")
+            return
+        file_paths, _ = QFileDialog.getOpenFileNames(self, "Выберите изображения (до 3)", "", "Images (*.png *.jpg *.jpeg *.gif *.bmp)")
+        if not file_paths:
+            return
+        # Ограничиваем до max_new
+        file_paths = file_paths[:max_new]
+        for fp in file_paths:
+            self._add_image_widget(fp)
+
+    def _add_image_widget(self, file_path):
+        """Создаёт виджет для изображения с превью и кнопкой удаления."""
+        frame = QFrame()
+        frame.setFrameShape(QFrame.Box)
+        frame.setStyleSheet("border: 1px solid #ccc; border-radius: 4px;")
+        layout = QVBoxLayout(frame)
+        layout.setSpacing(2)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        # Превью
+        pixmap = QPixmap(file_path)
+        if not pixmap.isNull():
+            pixmap = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        label = QLabel()
+        label.setPixmap(pixmap)
+        label.setAlignment(Qt.AlignCenter)
+        label.setFixedSize(90, 90)
+        label.setStyleSheet("background-color: #f0f0f0;")
+        layout.addWidget(label)
+
+        # Имя файла (короткое)
+        name_label = QLabel(Path(file_path).name)
+        name_label.setWordWrap(True)
+        name_label.setAlignment(Qt.AlignCenter)
+        name_label.setStyleSheet("font-size: 8pt;")
+        layout.addWidget(name_label)
+
+        # Кнопка удаления
+        del_btn = QPushButton("✖")
+        del_btn.setFixedSize(20, 20)
+        del_btn.clicked.connect(lambda: self._remove_image_widget(frame))
+        layout.addWidget(del_btn, alignment=Qt.AlignRight)
+
+        self.images_layout.addWidget(frame)
+        self.image_widgets.append((frame, file_path))
+
+    def _remove_image_widget(self, frame):
+        """Удаляет виджет изображения."""
+        for i, (f, path) in enumerate(self.image_widgets):
+            if f == frame:
+                self.image_widgets.pop(i)
+                frame.deleteLater()
+                break
+
+    def _get_image_paths(self):
+        """Возвращает список путей (максимум 3) к выбранным файлам."""
+        return [path for _, path in self.image_widgets]
+
+    def _copy_and_compress_image(self, src_path, dest_dir, part_id, index):
+        """
+        Копирует/сжимает изображение в папку data/images.
+        Возвращает относительный путь (относительно data/).
+        """
+        if not PILLOW_AVAILABLE:
+            # Если Pillow нет, просто копируем с оригинальным именем
+            dest_name = f"part_{part_id}_img_{index}_{Path(src_path).name}"
+            dest_path = dest_dir / dest_name
+            shutil.copy2(src_path, dest_path)
+            return f"images/{dest_name}"
+
+        try:
+            img = Image.open(src_path)
+            # Конвертация в RGB (если RGBA или P)
+            if img.mode in ('RGBA', 'LA', 'P'):
+                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                img = rgb_img
+            # Масштабирование (максимальная сторона 1024 пикселя)
+            max_size = 1024
+            if max(img.size) > max_size:
+                ratio = max_size / max(img.size)
+                new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
+                img = img.resize(new_size, Image.LANCZOS)
+            # Сохраняем как WebP с качеством 85%
+            dest_name = f"part_{part_id}_img_{index}.webp"
+            dest_path = dest_dir / dest_name
+            img.save(dest_path, 'WEBP', quality=85, optimize=True)
+            return f"images/{dest_name}"
+        except Exception as e:
+            logger.error(f"Ошибка обработки изображения {src_path}: {e}")
+            # При ошибке копируем оригинал
+            dest_name = f"part_{part_id}_img_{index}_{Path(src_path).name}"
+            dest_path = dest_dir / dest_name
+            shutil.copy2(src_path, dest_path)
+            return f"images/{dest_name}"
+
     def _load_comboboxes(self):
         part_types = set(self.db.get_dictionary_values('part_type'))
         for part in self.db.get_all_parts_filtered():
@@ -230,7 +353,6 @@ class PartDialog(QDialog):
         self.manufacturer_combo.clear()
         self.manufacturer_combo.addItems(sorted(manufacturers))
 
-    # ---- Динамическая смена единиц ----
     def _update_units_by_category(self, category_path):
         path_lower = category_path.lower()
         if "конденсатор" in path_lower:
@@ -248,7 +370,6 @@ class PartDialog(QDialog):
         else:
             combo.setCurrentIndex(0)
 
-    # ---- Извлечение мощности из категории ----
     def _extract_power_from_category(self, category_path):
         if not category_path:
             return ''
@@ -258,7 +379,6 @@ class PartDialog(QDialog):
             return f"{match.group(1)} Вт"
         return ''
 
-    # ---- Категория ----
     def _open_category_selector(self):
         dialog = CategorySelectorDialog(self, db=self.db, selected_category=self.category_edit.text(), start_depth=self.start_depth)
         dialog.category_selected.connect(self._on_category_selected)
@@ -275,7 +395,6 @@ class PartDialog(QDialog):
         else:
             self.dims_group.setVisible(False)
 
-    # ---- Парсинг номинала (для подсказки и сборки названия) ----
     def _parse_and_normalize(self, raw_text: str):
         if not raw_text:
             return None, "", ""
@@ -319,7 +438,6 @@ class PartDialog(QDialog):
         else:
             self.value_edit.setToolTip("Не удалось распознать номинал. Примеры: 10, 2.2, 100")
 
-    # ---- Сборка названия ----
     def _assemble_name(self):
         category_path = self.category_edit.text().strip()
         voltage = ''
@@ -352,7 +470,6 @@ class PartDialog(QDialog):
         else:
             QMessageBox.information(self, "Невозможно собрать", "Заполните хотя бы номинал или выберите категорию с параметрами")
 
-    # ---- Вспомогательные методы (каскадные обновления места) ----
     def _browse_file(self, line_edit, filter_str):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите файл", "", filter_str)
         if path:
@@ -403,7 +520,6 @@ class PartDialog(QDialog):
                     sections.add(p[3])
         self.location_section_combo.addItems([""] + sorted(sections))
 
-    # ---- Построение пути категории и ID ----
     def _get_category_id_from_path(self, category_path):
         if not category_path or not self.db:
             return None
@@ -447,7 +563,6 @@ class PartDialog(QDialog):
             current_id = parent_id
         return " / ".join(path_parts)
 
-    # ---- Заполнение формы данными из БД ----
     def _fill_form(self, data):
         self.name_edit.setText(data.get('name', ''))
         cat_id = data.get('category_id')
@@ -474,7 +589,6 @@ class PartDialog(QDialog):
         self.lead_pitch_spin.setValue(data.get('lead_pitch_mm', 0) or 0)
         self.lead_diameter_spin.setValue(data.get('lead_diameter_mm', 0) or 0)
 
-        # Восстановление номинала и единицы (упрощённо, только из value_numeric и value_unit)
         value_numeric = data.get('value_numeric')
         value_unit = data.get('value_unit', '')
         if value_numeric is not None:
@@ -515,7 +629,6 @@ class PartDialog(QDialog):
             if len(parts) >= 4:
                 self.location_section_combo.setCurrentText(parts[3])
 
-        self.image_path_edit.setText(data.get('image_path', ''))
         self.datasheet_path_edit.setText(data.get('datasheet_path', ''))
         if data.get('revision_date'):
             q_date = QDate.fromString(data['revision_date'], "yyyy-MM-dd")
@@ -523,7 +636,19 @@ class PartDialog(QDialog):
                 self.revision_date.setDate(q_date)
         self.notes_edit.setPlainText(data.get('notes', ''))
 
-    # ---- Сохранение ----
+        # Загрузка изображений
+        image_paths = [
+            data.get('image_path', ''),
+            data.get('image_path_2', ''),
+            data.get('image_path_3', '')
+        ]
+        for path in image_paths:
+            if path and Path(path).exists():
+                # Восстанавливаем абсолютный путь относительно data
+                full_path = DATA_DIR.parent / path if not Path(path).is_absolute() else Path(path)
+                if full_path.exists():
+                    self._add_image_widget(str(full_path))
+
     def validate_and_accept(self):
         if not self.name_edit.text().strip():
             QMessageBox.warning(self, "Ошибка", "⚠️ Наименование обязательно!")
@@ -549,7 +674,6 @@ class PartDialog(QDialog):
         category_id = self._get_category_id_from_path(category_path) if category_path else None
         raw_value = self.value_edit.text().strip()
         numeric, unit, normalized = self._parse_and_normalize(raw_value)
-        # Если единица не распознана, но выбрана в комбобоксе – используем её
         if not unit and self.unit_combo.currentText():
             unit = self.unit_combo.currentText()
             if numeric is None:
@@ -558,7 +682,6 @@ class PartDialog(QDialog):
                     numeric = float(match.group(1))
                     if numeric.is_integer():
                         numeric = int(numeric)
-        # Оставляем raw_value как есть (то, что ввел пользователь)
         value_raw = raw_value if raw_value else None
 
         return {
@@ -572,7 +695,9 @@ class PartDialog(QDialog):
             'price': self.price_spin.value(),
             'location': self.get_location_string(),
             'status': self.status_combo.currentText(),
-            'image_path': self.image_path_edit.text().strip(),
+            'image_path': '',  # будет заполнено при сохранении
+            'image_path_2': '',
+            'image_path_3': '',
             'datasheet_path': self.datasheet_path_edit.text().strip(),
             'revision_date': self.revision_date.date().toString("yyyy-MM-dd") if self.revision_date.date().isValid() else None,
             'notes': self.notes_edit.toPlainText().strip(),
@@ -583,4 +708,5 @@ class PartDialog(QDialog):
             'height_mm': self.height_spin.value() if self.height_spin.value() > 0 else None,
             'lead_pitch_mm': self.lead_pitch_spin.value() if self.lead_pitch_spin.value() > 0 else None,
             'lead_diameter_mm': self.lead_diameter_spin.value() if self.lead_diameter_spin.value() > 0 else None,
+            'image_files': self._get_image_paths()  # список оригинальных путей для обработки
         }
