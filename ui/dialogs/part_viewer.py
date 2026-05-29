@@ -4,16 +4,84 @@ import urllib.request
 import ssl
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QScrollArea, QFileDialog, QMessageBox, QWidget, QGridLayout,
-    QSizePolicy
+    QFileDialog, QMessageBox, QWidget, QFrame, QTextEdit, QScrollArea,
+    QComboBox
 )
 from PySide6.QtCore import Qt, QEvent, QSize
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QFont
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtGui import QTextDocument
 from .part_dialog import PartDialog
 
+class NotesWindow(QDialog):
+    """Отдельное окно для просмотра заметок с возможностью изменения шрифта."""
+    def __init__(self, notes_text, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Заметки")
+        self.setMinimumSize(500, 400)
+        self.resize(600, 500)
+        self.notes_text = notes_text
+        self.current_font_size = 10
+        self._init_ui()
+        self._fill_notes()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Панель инструментов для изменения шрифта
+        toolbar = QHBoxLayout()
+        self.font_size_label = QLabel("Размер шрифта:")
+        self.font_size_combo = QComboBox()
+        self.font_size_combo.addItems(["8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "32"])
+        self.font_size_combo.setCurrentText("10")
+        self.font_size_combo.currentTextChanged.connect(self._change_font_size)
+        self.btn_zoom_in = QPushButton("➕")
+        self.btn_zoom_in.clicked.connect(lambda: self._change_font_size_delta(1))
+        self.btn_zoom_out = QPushButton("➖")
+        self.btn_zoom_out.clicked.connect(lambda: self._change_font_size_delta(-1))
+        toolbar.addWidget(self.font_size_label)
+        toolbar.addWidget(self.font_size_combo)
+        toolbar.addWidget(self.btn_zoom_in)
+        toolbar.addWidget(self.btn_zoom_out)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+
+        # Поле заметок (только чтение)
+        self.notes_edit = QTextEdit()
+        self.notes_edit.setReadOnly(True)
+        self.notes_edit.setStyleSheet("background-color: #ffffff; border: 1px solid #cccccc;")
+        layout.addWidget(self.notes_edit)
+
+        # Кнопка закрытия
+        close_btn = QPushButton("Закрыть")
+        close_btn.clicked.connect(self.close)
+        layout.addWidget(close_btn, alignment=Qt.AlignRight)
+
+    def _change_font_size(self, size_str):
+        try:
+            size = int(size_str)
+            self.current_font_size = size
+            font = QFont()
+            font.setPointSize(size)
+            self.notes_edit.setFont(font)
+        except:
+            pass
+
+    def _change_font_size_delta(self, delta):
+        new_size = self.current_font_size + delta
+        if 6 <= new_size <= 72:
+            self.current_font_size = new_size
+            self.font_size_combo.setCurrentText(str(new_size))
+            font = QFont()
+            font.setPointSize(new_size)
+            self.notes_edit.setFont(font)
+
+    def _fill_notes(self):
+        self.notes_edit.setPlainText(self.notes_text if self.notes_text else "—")
+
+
 class ImageZoomWindow(QDialog):
+    """Окно для увеличенного просмотра изображения с зумом колёсиком."""
     def __init__(self, pixmap, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Увеличенное изображение")
@@ -23,6 +91,7 @@ class ImageZoomWindow(QDialog):
         self._init_ui()
 
     def _init_ui(self):
+        from PySide6.QtWidgets import QScrollArea, QSizePolicy
         layout = QVBoxLayout(self)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -50,9 +119,7 @@ class ImageZoomWindow(QDialog):
         layout.addLayout(btn_layout)
 
         self._update_pixmap()
-        self.setMouseTracking(True)
         self.scroll_area.viewport().installEventFilter(self)
-        self.image_label.installEventFilter(self)
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Wheel:
@@ -88,12 +155,14 @@ class ImageZoomWindow(QDialog):
 
 
 class PartViewer(QDialog):
+    """Окно просмотра детали с прокруткой содержимого (адаптивное)."""
     def __init__(self, part_data, db, parent=None):
         super().__init__(parent)
         self.part_data = part_data
         self.db = db
         self.setWindowTitle(f"Просмотр детали: {part_data.get('name', 'Без имени')}")
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(750, 550)
+        self.resize(800, 620)
         self.setWindowFlags(self.windowFlags() | Qt.Window)
         self.current_pixmap = None
         self._init_ui()
@@ -101,28 +170,40 @@ class PartViewer(QDialog):
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(15, 15, 15, 15)
 
-        top_layout = QHBoxLayout()
+        # === Верхняя панель: наименование и статус ===
+        title_widget = QWidget()
+        title_layout = QHBoxLayout(title_widget)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+
         self.name_label = QLabel()
-        self.name_label.setStyleSheet("font-size: 16pt; font-weight: bold;")
-        top_layout.addWidget(self.name_label)
-        top_layout.addStretch()
+        name_font = QFont()
+        name_font.setPointSize(16)
+        name_font.setBold(True)
+        self.name_label.setFont(name_font)
+        self.name_label.setWordWrap(True)
+        title_layout.addWidget(self.name_label, 1)
+
         self.status_label = QLabel()
         self.status_label.setStyleSheet("font-weight: bold; padding: 4px 8px; border-radius: 4px;")
-        top_layout.addWidget(self.status_label)
-        main_layout.addLayout(top_layout)
+        self.status_label.setAlignment(Qt.AlignCenter)
+        title_layout.addWidget(self.status_label)
 
-        content_splitter = QHBoxLayout()
+        main_layout.addWidget(title_widget)
 
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
+        # === Фото и кнопки управления ===
+        photo_widget = QWidget()
+        photo_layout = QVBoxLayout(photo_widget)
+        photo_layout.setSpacing(5)
+
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setMinimumSize(200, 200)
-        self.image_label.setMaximumSize(400, 400)
-        self.image_label.setStyleSheet("border: 1px solid gray; background-color: #f0f0f0;")
+        self.image_label.setFixedSize(200, 200)
+        self.image_label.setStyleSheet("border: 1px solid #cccccc; background-color: #f8f8f8; border-radius: 8px;")
         self.image_label.setScaledContents(False)
-        left_layout.addWidget(self.image_label, alignment=Qt.AlignCenter)
+        photo_layout.addWidget(self.image_label, alignment=Qt.AlignCenter)
 
         img_btn_layout = QHBoxLayout()
         self.zoom_btn = QPushButton("🔍 Увеличить")
@@ -131,99 +212,191 @@ class PartViewer(QDialog):
         self.save_img_btn.clicked.connect(self._save_image)
         img_btn_layout.addWidget(self.zoom_btn)
         img_btn_layout.addWidget(self.save_img_btn)
-        left_layout.addLayout(img_btn_layout)
-        left_layout.addStretch()
+        photo_layout.addLayout(img_btn_layout)
 
-        right_widget = QWidget()
-        self.properties_grid = QGridLayout(right_widget)
-        self.properties_grid.setColumnStretch(1, 1)
-        self.properties_grid.setColumnStretch(3, 1)
-        self.property_labels = {}
+        main_layout.addWidget(photo_widget, alignment=Qt.AlignCenter)
 
-        properties = [
-            ("ID", "id"), ("Наименование", "name"), ("Категория", "category_path"),
-            ("Тип детали", "part_type"), ("Номинал", "value_nice"), ("Корпус", "package"),
-            ("Диаметр (мм)", "diameter_mm"), ("Высота (мм)", "height_mm"),
-            ("Шаг выводов (мм)", "lead_pitch_mm"), ("Толщина выводов (мм)", "lead_diameter_mm"),
-            ("Количество", "quantity"), ("Цена (₽)", "price"), ("Место хранения", "location"),
-            ("Состояние", "status"), ("Производитель", "manufacturer"), ("Артикул (MPN)", "part_number"),
-            ("Дата ревизии", "revision_date")
+        # === Разделитель ===
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        main_layout.addWidget(line)
+
+        # === Прокручиваемая область для всей информации ===
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QScrollArea.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(12)
+
+        # === Две колонки с информацией ===
+        info_widget = QWidget()
+        info_layout = QHBoxLayout(info_widget)
+        info_layout.setSpacing(20)
+
+        # Левая колонка
+        left_col = QWidget()
+        left_layout = QVBoxLayout(left_col)
+        left_layout.setSpacing(8)
+        # Правая колонка
+        right_col = QWidget()
+        right_layout = QVBoxLayout(right_col)
+        right_layout.setSpacing(8)
+
+        # Определяем поля для левой колонки
+        self.left_fields = {}
+        left_labels = [
+            ("🆔 ID:", "id"),
+            ("📂 Категория:", "category"),
+            ("🔧 Тип детали:", "part_type"),
+            ("⚡ Номинал:", "value"),
+            ("📦 Корпус:", "package"),
+            ("🏭 Производитель:", "manufacturer"),
+            ("🔖 Артикул:", "mpn"),
         ]
-        left_col, right_col = [], []
-        for i, (label, key) in enumerate(properties):
-            (left_col if i % 2 == 0 else right_col).append((label, key))
-        row = 0
-        for label, key in left_col:
-            lbl = QLabel(label + ":")
-            lbl.setStyleSheet("font-weight: bold;")
-            val = QLabel()
-            val.setWordWrap(True)
-            self.properties_grid.addWidget(lbl, row, 0, Qt.AlignTop)
-            self.properties_grid.addWidget(val, row, 1, Qt.AlignTop)
-            self.property_labels[key] = val
-            row += 1
-        row = 0
-        for label, key in right_col:
-            lbl = QLabel(label + ":")
-            lbl.setStyleSheet("font-weight: bold;")
-            val = QLabel()
-            val.setWordWrap(True)
-            self.properties_grid.addWidget(lbl, row, 2, Qt.AlignTop)
-            self.properties_grid.addWidget(val, row, 3, Qt.AlignTop)
-            self.property_labels[key] = val
-            row += 1
+        for label_text, key in left_labels:
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+            label = QLabel(label_text)
+            label.setStyleSheet("font-weight: bold;")
+            value = QLabel("—")
+            value.setWordWrap(True)
+            row_layout.addWidget(label)
+            row_layout.addWidget(value, 1)
+            left_layout.addWidget(row_widget)
+            self.left_fields[key] = value
 
-        notes_label = QLabel("Заметки:")
-        notes_label.setStyleSheet("font-weight: bold;")
-        self.properties_grid.addWidget(notes_label, self.properties_grid.rowCount(), 0, 1, 2)
-        self.notes_text = QTextEdit()
-        self.notes_text.setReadOnly(True)
-        self.notes_text.setMaximumHeight(100)
-        self.properties_grid.addWidget(self.notes_text, self.properties_grid.rowCount()-1, 2, 1, 2)
+        # Поля для правой колонки
+        self.right_fields = {}
+        right_labels = [
+            ("📦 Количество:", "quantity"),
+            ("💰 Цена (₽):", "price"),
+            ("📍 Место:", "location"),
+            ("🏷️ Статус:", "status"),
+            ("📅 Дата ревизии:", "revision_date"),
+        ]
+        for label_text, key in right_labels:
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+            label = QLabel(label_text)
+            label.setStyleSheet("font-weight: bold;")
+            value = QLabel("—")
+            value.setWordWrap(True)
+            row_layout.addWidget(label)
+            row_layout.addWidget(value, 1)
+            right_layout.addWidget(row_widget)
+            self.right_fields[key] = value
 
-        ds_label = QLabel("Даташит:")
+        info_layout.addWidget(left_col, 1)
+        info_layout.addWidget(right_col, 1)
+        content_layout.addWidget(info_widget)
+
+        # === Блок размеров конденсатора (в одну строку) ===
+        self.dims_widget = QWidget()
+        dims_layout = QHBoxLayout(self.dims_widget)
+        dims_layout.setContentsMargins(0, 0, 0, 0)
+        dims_layout.setSpacing(15)
+        self.diam_label = QLabel("⌀ — мм")
+        self.height_label = QLabel("высота — мм")
+        self.pitch_label = QLabel("шаг — мм")
+        self.lead_label = QLabel("вывод — мм")
+        for lbl in (self.diam_label, self.height_label, self.pitch_label, self.lead_label):
+            lbl.setStyleSheet("color: #555;")
+            dims_layout.addWidget(lbl)
+        dims_layout.addStretch()
+        content_layout.addWidget(self.dims_widget)
+        self.dims_widget.setVisible(False)
+
+        # === Даташит и заметки ===
+        doc_widget = QWidget()
+        doc_layout = QVBoxLayout(doc_widget)
+        doc_layout.setSpacing(5)
+
+        # Даташит
+        ds_widget = QWidget()
+        ds_layout = QHBoxLayout(ds_widget)
+        ds_layout.setContentsMargins(0, 0, 0, 0)
+        ds_label = QLabel("📄 Даташит:")
         ds_label.setStyleSheet("font-weight: bold;")
         self.datasheet_link = QLabel()
         self.datasheet_link.setOpenExternalLinks(True)
         self.datasheet_link.setTextInteractionFlags(Qt.TextBrowserInteraction)
-        self.properties_grid.addWidget(ds_label, self.properties_grid.rowCount(), 0, Qt.AlignTop)
-        self.properties_grid.addWidget(self.datasheet_link, self.properties_grid.rowCount()-1, 1, 1, 3)
+        ds_layout.addWidget(ds_label)
+        ds_layout.addWidget(self.datasheet_link, 1)
+        doc_layout.addWidget(ds_widget)
 
-        content_splitter.addWidget(left_widget, 1)
-        content_splitter.addWidget(right_widget, 2)
-        main_layout.addLayout(content_splitter)
+        # Заметки с прокруткой и кнопкой открыть в окне
+        notes_widget = QWidget()
+        notes_layout = QHBoxLayout(notes_widget)
+        notes_layout.setContentsMargins(0, 0, 0, 0)
+        notes_label = QLabel("📝 Заметки:")
+        notes_label.setStyleSheet("font-weight: bold;")
+        self.notes_edit = QTextEdit()
+        self.notes_edit.setReadOnly(True)
+        self.notes_edit.setMaximumHeight(80)
+        self.notes_edit.setStyleSheet("background-color: #fafafa; border: 1px solid #ddd; border-radius: 4px;")
+        self.notes_btn = QPushButton("📄 Открыть в окне")
+        self.notes_btn.clicked.connect(self._open_notes_window)
+        notes_layout.addWidget(notes_label)
+        notes_layout.addWidget(self.notes_edit, 1)
+        notes_layout.addWidget(self.notes_btn)
+        doc_layout.addWidget(notes_widget)
 
+        content_layout.addWidget(doc_widget)
+        content_layout.addStretch()
+
+        self.scroll_area.setWidget(content_widget)
+        main_layout.addWidget(self.scroll_area, 1)
+
+        # === Кнопки действий ===
         btn_layout = QHBoxLayout()
-        btn_edit = QPushButton("✏️ Редактировать")
-        btn_edit.clicked.connect(self._edit_part)
-        btn_print = QPushButton("🖨️ Печать / PDF")
-        btn_print.clicked.connect(self._print_part)
-        btn_close = QPushButton("Закрыть")
-        btn_close.clicked.connect(self.close)
-        btn_layout.addWidget(btn_edit)
-        btn_layout.addWidget(btn_print)
+        self.btn_edit = QPushButton("✏️ Редактировать")
+        self.btn_edit.clicked.connect(self._edit_part)
+        self.btn_print = QPushButton("🖨️ Печать / PDF")
+        self.btn_print.clicked.connect(self._print_part)
+        self.btn_close = QPushButton("Закрыть")
+        self.btn_close.clicked.connect(self.close)
+        btn_layout.addWidget(self.btn_edit)
+        btn_layout.addWidget(self.btn_print)
         btn_layout.addStretch()
-        btn_layout.addWidget(btn_close)
+        btn_layout.addWidget(self.btn_close)
         main_layout.addLayout(btn_layout)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._rescale_image()
+        self.setStyleSheet("""
+            QLabel {
+                color: #333;
+            }
+            QPushButton {
+                padding: 5px 15px;
+            }
+        """)
 
-    def _rescale_image(self):
-        if self.current_pixmap and not self.current_pixmap.isNull():
-            max_size = self.image_label.maximumSize()
-            if max_size.width() <= 0 or max_size.height() <= 0:
-                max_size = QSize(400, 400)
-            scaled = self.current_pixmap.scaled(max_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.image_label.setPixmap(scaled)
-            self.image_label.setFixedSize(scaled.size())
+    def _open_notes_window(self):
+        """Открывает отдельное окно с заметками."""
+        notes_text = self.part_data.get('notes', '')
+        win = NotesWindow(notes_text, self)
+        win.exec()
+
+    def _set_field(self, field_dict, key, value, suffix=""):
+        if value is not None and str(value).strip() and str(value) != "None":
+            text = str(value)
+            if suffix:
+                text += " " + suffix
+            field_dict[key].setText(text)
         else:
-            self.image_label.setText("Нет фото")
-            self.image_label.setFixedSize(200, 200)
+            field_dict[key].setText("—")
 
     def _fill_data(self):
-        self.name_label.setText(self.part_data.get('name', ''))
+        # Наименование и статус
+        self.name_label.setText(self.part_data.get('name', 'Без имени'))
         status = self.part_data.get('status', 'Новое')
         self.status_label.setText(status)
         status_colors = {
@@ -234,64 +407,90 @@ class PartViewer(QDialog):
             "Неисправно": "#ef9a9a"
         }
         bg = status_colors.get(status, "#e0e0e0")
-        self.status_label.setStyleSheet(f"background-color: {bg}; font-weight: bold; padding: 4px 8px; border-radius: 4px;")
+        self.status_label.setStyleSheet(f"background-color: {bg}; font-weight: bold; padding: 4px 12px; border-radius: 4px;")
 
-        self._set_label("id", str(self.part_data.get('id', '')))
-        self._set_label("name", self.part_data.get('name', ''))
+        # ID
+        self._set_field(self.left_fields, "id", self.part_data.get('id'))
+        # Категория
         cat_id = self.part_data.get('category_id')
         if cat_id:
-            path = self._get_category_path(cat_id)
-            self._set_label("category_path", path)
+            cat_path = self._get_category_path(cat_id)
+            self._set_field(self.left_fields, "category", cat_path)
         else:
-            self._set_label("category_path", "—")
-        self._set_label("part_type", self.part_data.get('part_type') or '—')
+            self.left_fields["category"].setText("—")
+        # Тип детали
+        self._set_field(self.left_fields, "part_type", self.part_data.get('part_type'))
+        # Номинал
         val_num = self.part_data.get('value_numeric')
         val_unit = self.part_data.get('value_unit')
         if val_num is not None and val_unit:
             if isinstance(val_num, float) and val_num.is_integer():
                 val_num = int(val_num)
-            self._set_label("value_nice", f"{val_num}{val_unit}")
+            self.left_fields["value"].setText(f"{val_num}{val_unit}")
         elif val_num is not None:
-            self._set_label("value_nice", str(val_num))
+            self.left_fields["value"].setText(str(val_num))
         else:
-            self._set_label("value_nice", "—")
-        self._set_label("package", self.part_data.get('package') or '—')
-        self._set_label("diameter_mm", self._format_dim(self.part_data.get('diameter_mm'), "мм"))
-        self._set_label("height_mm", self._format_dim(self.part_data.get('height_mm'), "мм"))
-        self._set_label("lead_pitch_mm", self._format_dim(self.part_data.get('lead_pitch_mm'), "мм"))
-        self._set_label("lead_diameter_mm", self._format_dim(self.part_data.get('lead_diameter_mm'), "мм"))
-        self._set_label("quantity", str(self.part_data.get('quantity', 0)))
+            self.left_fields["value"].setText("—")
+        # Корпус
+        self._set_field(self.left_fields, "package", self.part_data.get('package'))
+        # Производитель
+        self._set_field(self.left_fields, "manufacturer", self.part_data.get('manufacturer'))
+        # Артикул
+        self._set_field(self.left_fields, "mpn", self.part_data.get('part_number'))
+
+        # Правая колонка
+        qty = self.part_data.get('quantity', 0)
+        self._set_field(self.right_fields, "quantity", qty)
+        if qty == 0:
+            self.right_fields["quantity"].setStyleSheet("color: #d32f2f; font-weight: bold;")
+        elif qty < 10:
+            self.right_fields["quantity"].setStyleSheet("color: #f57c00; font-weight: bold;")
+        else:
+            self.right_fields["quantity"].setStyleSheet("color: #2e7d32; font-weight: bold;")
+
         price = self.part_data.get('price', 0)
-        self._set_label("price", f"{price:.2f}")
-        self._set_label("location", self.part_data.get('location') or '—')
-        self._set_label("status", status)
-        self._set_label("manufacturer", self.part_data.get('manufacturer') or '—')
-        self._set_label("part_number", self.part_data.get('part_number') or '—')
-        rev = self.part_data.get('revision_date')
-        self._set_label("revision_date", rev if rev else '—')
-        self.notes_text.setPlainText(self.part_data.get('notes') or '')
+        self._set_field(self.right_fields, "price", f"{price:.2f}")
+        self._set_field(self.right_fields, "location", self.part_data.get('location'))
+        self._set_field(self.right_fields, "status", status)
+        self._set_field(self.right_fields, "revision_date", self.part_data.get('revision_date'))
+
+        # Размеры конденсатора
+        cat_id = self.part_data.get('category_id')
+        if cat_id:
+            cat_path = self._get_category_path(cat_id)
+            is_capacitor = "конденсатор" in cat_path.lower()
+            self.dims_widget.setVisible(is_capacitor)
+            if is_capacitor:
+                diam = self.part_data.get('diameter_mm')
+                height = self.part_data.get('height_mm')
+                pitch = self.part_data.get('lead_pitch_mm')
+                lead = self.part_data.get('lead_diameter_mm')
+                self.diam_label.setText(f"⌀ {diam} мм" if diam else "⌀ — мм")
+                self.height_label.setText(f"высота {height} мм" if height else "высота — мм")
+                self.pitch_label.setText(f"шаг {pitch} мм" if pitch else "шаг — мм")
+                self.lead_label.setText(f"вывод {lead} мм" if lead else "вывод — мм")
+        else:
+            self.dims_widget.setVisible(False)
+
+        # Даташит
         ds_path = self.part_data.get('datasheet_path')
         if ds_path:
             if ds_path.startswith(('http://', 'https://')):
-                self.datasheet_link.setText(f'<a href="{ds_path}">{ds_path}</a>')
-                self.datasheet_link.setToolTip("Открыть в браузере")
+                self.datasheet_link.setText(f'<a href="{ds_path}">Открыть в браузере</a>')
+                self.datasheet_link.setToolTip(ds_path)
             else:
                 if os.path.exists(ds_path):
-                    self.datasheet_link.setText(f'<a href="file:///{ds_path}">{os.path.basename(ds_path)}</a>')
+                    self.datasheet_link.setText(f'<a href="file:///{ds_path}">Открыть файл</a>')
                 else:
                     self.datasheet_link.setText("Файл не найден")
         else:
             self.datasheet_link.setText("—")
+
+        # Заметки
+        notes = self.part_data.get('notes', '')
+        self.notes_edit.setPlainText(notes if notes else "—")
+        # Загрузка фото
         self._load_image()
-
-    def _set_label(self, key, text):
-        if key in self.property_labels:
-            self.property_labels[key].setText(text)
-
-    def _format_dim(self, value, unit):
-        if value and value > 0:
-            return f"{value} {unit}"
-        return "—"
 
     def _get_category_path(self, cat_id):
         cats = self.db.get_categories()
@@ -325,11 +524,20 @@ class PartViewer(QDialog):
         if not pixmap.isNull():
             self.current_pixmap = pixmap
             self._rescale_image()
-            self.image_label.setToolTip("Кликните правой кнопкой для увеличения")
+            self.image_label.setToolTip("Двойной клик для увеличения")
+            self.image_label.mouseDoubleClickEvent = lambda e: self._zoom_image()
         else:
             self.current_pixmap = None
             self.image_label.setText("Нет фото")
-            self.image_label.setStyleSheet("border: 1px solid gray; background-color: #f0f0f0;")
+            self.image_label.setStyleSheet("border: 1px solid #cccccc; background-color: #f8f8f8; border-radius: 8px;")
+
+    def _rescale_image(self):
+        if self.current_pixmap and not self.current_pixmap.isNull():
+            scaled = self.current_pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.image_label.setPixmap(scaled)
+            self.image_label.setFixedSize(scaled.size())
+        else:
+            self.image_label.setText("Нет фото")
             self.image_label.setFixedSize(200, 200)
 
     def _zoom_image(self):
@@ -385,7 +593,7 @@ class PartViewer(QDialog):
         <tr><th>ID</th><td>{self.part_data.get('id', '')}</td></tr>
         <tr><th>Категория</th><td>{self._get_category_path(self.part_data.get('category_id')) if self.part_data.get('category_id') else '—'}</td></tr>
         <tr><th>Тип детали</th><td>{self.part_data.get('part_type', '—')}</td></tr>
-        <tr><th>Номинал</th><td>{self.property_labels.get('value_nice', QLabel()).text()}</td></tr>
+        <tr><th>Номинал</th><td>{self.left_fields.get('value', QLabel()).text()}</td></tr>
         <tr><th>Корпус</th><td>{self.part_data.get('package', '—')}</td></tr>
         <tr><th>Диаметр</th><td>{self._format_dim(self.part_data.get('diameter_mm'), 'мм')}</td></tr>
         <tr><th>Высота</th><td>{self._format_dim(self.part_data.get('height_mm'), 'мм')}</td></tr>
@@ -403,3 +611,8 @@ class PartViewer(QDialog):
         </html>
         """
         return html
+
+    def _format_dim(self, value, unit):
+        if value and value > 0:
+            return f"{value} {unit}"
+        return "—"

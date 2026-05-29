@@ -13,7 +13,7 @@ class BatchEditDialog(QDialog):
         self.part_ids = part_ids
         self.db = db
         self.setWindowTitle(f"Пакетное редактирование (выбрано {len(part_ids)} деталей)")
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(550)
         self._init_ui()
 
     def _init_ui(self):
@@ -77,7 +77,28 @@ class BatchEditDialog(QDialog):
         manuf_layout.addWidget(self.manuf_combo)
         layout.addLayout(manuf_layout)
 
-        # ---- Цена (группа радиокнопок) ----
+        # ---- Номинал (новая группа) ----
+        nominal_group = QGroupBox("Номинал")
+        nominal_layout = QVBoxLayout(nominal_group)
+        self.nominal_radio_no = QRadioButton("Не менять")
+        self.nominal_radio_no.setChecked(True)
+        self.nominal_radio_set = QRadioButton("Установить:")
+        nominal_value_layout = QHBoxLayout()
+        self.nominal_value_edit = QDoubleSpinBox()
+        self.nominal_value_edit.setRange(-999999, 999999)
+        self.nominal_value_edit.setDecimals(6)
+        self.nominal_value_edit.setPrefix("")
+        self.nominal_unit_combo = QComboBox()
+        self.nominal_unit_combo.setEditable(True)
+        self.nominal_unit_combo.addItems(["", "Ом", "кОм", "МОм", "пФ", "нФ", "мкФ", "Ф", "мкГн", "мГн", "Гн", "В", "А", "мА", "мВ", "шт"])
+        nominal_value_layout.addWidget(self.nominal_value_edit)
+        nominal_value_layout.addWidget(self.nominal_unit_combo)
+        nominal_layout.addWidget(self.nominal_radio_no)
+        nominal_layout.addWidget(self.nominal_radio_set)
+        nominal_layout.addLayout(nominal_value_layout)
+        layout.addWidget(nominal_group)
+
+        # ---- Цена ----
         price_group = QGroupBox("Цена")
         price_layout = QVBoxLayout(price_group)
         self.price_radio_no = QRadioButton("Не менять")
@@ -96,7 +117,7 @@ class BatchEditDialog(QDialog):
         price_layout.addWidget(self.price_edit)
         layout.addWidget(price_group)
 
-        # ---- Количество (группа) ----
+        # ---- Количество ----
         qty_group = QGroupBox("Количество")
         qty_layout = QVBoxLayout(qty_group)
         self.qty_radio_no = QRadioButton("Не менять")
@@ -147,18 +168,14 @@ class BatchEditDialog(QDialog):
 
     def _on_cat_combo_changed(self, idx):
         if self.cat_combo.currentData() == "select":
-            # Пользователь выбрал "Выбрать категорию..."
             from .category_selector import CategorySelectorDialog
             dialog = CategorySelectorDialog(self, db=self.db, start_depth=1)
             dialog.category_selected.connect(self._set_category)
             dialog.exec()
-            # После закрытия диалога не сбрасываем индекс, т.к. _set_category уже установил нужный пункт
-            # Если же пользователь закрыл диалог без выбора, то возвращаемся на "— Не менять —"
             if self.cat_combo.currentData() == "select":
                 self.cat_combo.setCurrentIndex(0)
 
     def _set_category(self, path):
-        # Добавляем выбранную категорию в comboBox как отдельный пункт, если ещё нет
         existing_index = -1
         for i in range(self.cat_combo.count()):
             if self.cat_combo.itemData(i) == path:
@@ -183,11 +200,9 @@ class BatchEditDialog(QDialog):
         # Категория
         cat_data = self.cat_combo.currentData()
         if cat_data and cat_data != "select" and cat_data is not None:
-            # cat_data — это строка пути категории
-            cat_path = cat_data
-            cat_id = self._get_category_id_from_path(cat_path)
+            cat_id = self._get_category_id_from_path(cat_data)
             if cat_id is None:
-                errors.append(f"Категория '{cat_path}' не найдена в базе.")
+                errors.append(f"Категория '{cat_data}' не найдена в базе.")
             else:
                 updates['category_id'] = cat_id
 
@@ -200,7 +215,7 @@ class BatchEditDialog(QDialog):
             updates['status'] = self.status_combo.currentText()
 
         # Тип детали
-        if self.type_combo.currentIndex() > 0:  # первый пункт "— Не менять —"
+        if self.type_combo.currentIndex() > 0:
             new_type = self.type_combo.currentText().strip()
             if new_type:
                 updates['part_type'] = new_type
@@ -212,6 +227,17 @@ class BatchEditDialog(QDialog):
             if new_manuf:
                 updates['manufacturer'] = new_manuf
                 self.db.add_dictionary_value('manufacturer', new_manuf)
+
+        # Номинал
+        if self.nominal_radio_set.isChecked():
+            numeric = self.nominal_value_edit.value()
+            unit = self.nominal_unit_combo.currentText().strip()
+            if unit:
+                updates['value_numeric'] = numeric
+                updates['value_unit'] = unit
+                updates['value_raw'] = f"{numeric} {unit}"
+            else:
+                errors.append("Для изменения номинала необходимо указать единицу измерения.")
 
         # Цена
         price_value = self.price_edit.value()
@@ -245,6 +271,11 @@ class BatchEditDialog(QDialog):
             for key in ['category_id', 'location', 'status', 'part_type', 'manufacturer']:
                 if key in updates:
                     new_data[key] = updates[key]
+            # Номинал
+            if 'value_numeric' in updates:
+                new_data['value_numeric'] = updates['value_numeric']
+                new_data['value_unit'] = updates['value_unit']
+                new_data['value_raw'] = updates['value_raw']
             # Цена
             if 'price_operation' in updates:
                 op, val = updates['price_operation']
