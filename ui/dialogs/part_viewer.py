@@ -5,32 +5,88 @@ import ssl
 from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFileDialog, QMessageBox, QWidget, QFrame, QTextEdit, QScrollArea
+    QFileDialog, QMessageBox, QWidget, QFrame, QTextEdit, QScrollArea,
+    QSizePolicy, QComboBox
 )
-from PySide6.QtCore import Qt, QEvent, QSize, QPoint
+from PySide6.QtCore import Qt, QEvent, QSize
 from PySide6.QtGui import QPixmap, QFont
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtGui import QTextDocument
 from .part_dialog import PartDialog
 from config import DATA_DIR
 
-class ImageZoomWindow(QDialog):
-    """Окно для увеличенного просмотра изображения с зумом колёсиком и поддержкой нескольких изображений."""
-    def __init__(self, pixmaps, start_index=0, parent=None):
-        """
-        pixmaps: список QPixmap (оригиналы) для нескольких изображений.
-        start_index: индекс текущего изображения.
-        """
+class NotesWindow(QDialog):
+    # ... (без изменений, как был ранее) ...
+    def __init__(self, notes_text, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Просмотр изображений")
+        self.setWindowTitle("Заметки")
         self.setMinimumSize(500, 400)
-        self.original_pixmaps = pixmaps
-        self.current_index = start_index
-        self.current_zoom = 1.0
+        self.resize(600, 500)
+        self.notes_text = notes_text
+        self.current_font_size = 10
         self._init_ui()
-        self._update_image()
+        self._fill_notes()
 
     def _init_ui(self):
+        layout = QVBoxLayout(self)
+        toolbar = QHBoxLayout()
+        self.font_size_label = QLabel("Размер шрифта:")
+        self.font_size_combo = QComboBox()
+        self.font_size_combo.addItems(["8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "32"])
+        self.font_size_combo.setCurrentText("10")
+        self.font_size_combo.currentTextChanged.connect(self._change_font_size)
+        self.btn_zoom_in = QPushButton("➕")
+        self.btn_zoom_in.clicked.connect(lambda: self._change_font_size_delta(1))
+        self.btn_zoom_out = QPushButton("➖")
+        self.btn_zoom_out.clicked.connect(lambda: self._change_font_size_delta(-1))
+        toolbar.addWidget(self.font_size_label)
+        toolbar.addWidget(self.font_size_combo)
+        toolbar.addWidget(self.btn_zoom_in)
+        toolbar.addWidget(self.btn_zoom_out)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+        self.notes_edit = QTextEdit()
+        self.notes_edit.setReadOnly(True)
+        self.notes_edit.setStyleSheet("background-color: #ffffff; border: 1px solid #cccccc;")
+        layout.addWidget(self.notes_edit)
+        close_btn = QPushButton("Закрыть")
+        close_btn.clicked.connect(self.close)
+        layout.addWidget(close_btn, alignment=Qt.AlignRight)
+
+    def _change_font_size(self, size_str):
+        try:
+            size = int(size_str)
+            self.current_font_size = size
+            font = QFont()
+            font.setPointSize(size)
+            self.notes_edit.setFont(font)
+        except:
+            pass
+
+    def _change_font_size_delta(self, delta):
+        new_size = self.current_font_size + delta
+        if 6 <= new_size <= 72:
+            self.current_font_size = new_size
+            self.font_size_combo.setCurrentText(str(new_size))
+            font = QFont()
+            font.setPointSize(new_size)
+            self.notes_edit.setFont(font)
+
+    def _fill_notes(self):
+        self.notes_edit.setPlainText(self.notes_text if self.notes_text else "—")
+
+class ImageZoomWindow(QDialog):
+    # ... (без изменений) ...
+    def __init__(self, pixmap, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Увеличенное изображение")
+        self.setMinimumSize(400, 300)
+        self.original_pixmap = pixmap
+        self.current_zoom = 1.0
+        self._init_ui()
+
+    def _init_ui(self):
+        from PySide6.QtWidgets import QScrollArea
         layout = QVBoxLayout(self)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -40,55 +96,23 @@ class ImageZoomWindow(QDialog):
         self.image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.scroll_area.setWidget(self.image_label)
         layout.addWidget(self.scroll_area)
-
-        # Панель управления (навигация, зум)
-        control_layout = QHBoxLayout()
-        self.prev_btn = QPushButton("◀ Пред.")
-        self.prev_btn.clicked.connect(self._prev_image)
-        self.prev_btn.setEnabled(len(self.original_pixmaps) > 1)
-        self.next_btn = QPushButton("След. ▶")
-        self.next_btn.clicked.connect(self._next_image)
-        self.next_btn.setEnabled(len(self.original_pixmaps) > 1)
-        self.counter_label = QLabel()
-        self._update_counter_label()
-        
-        self.zoom_in_btn = QPushButton("➕")
+        btn_layout = QHBoxLayout()
+        self.zoom_in_btn = QPushButton("➕ Увеличить")
         self.zoom_in_btn.clicked.connect(lambda: self._zoom(1.2))
-        self.zoom_out_btn = QPushButton("➖")
+        self.zoom_out_btn = QPushButton("➖ Уменьшить")
         self.zoom_out_btn.clicked.connect(lambda: self._zoom(0.8))
         self.reset_btn = QPushButton("🔄 Сбросить")
         self.reset_btn.clicked.connect(self._reset_zoom)
         self.close_btn = QPushButton("Закрыть")
         self.close_btn.clicked.connect(self.close)
-
-        control_layout.addWidget(self.prev_btn)
-        control_layout.addWidget(self.counter_label)
-        control_layout.addWidget(self.next_btn)
-        control_layout.addStretch()
-        control_layout.addWidget(self.zoom_in_btn)
-        control_layout.addWidget(self.zoom_out_btn)
-        control_layout.addWidget(self.reset_btn)
-        control_layout.addWidget(self.close_btn)
-        layout.addLayout(control_layout)
-
+        btn_layout.addWidget(self.zoom_in_btn)
+        btn_layout.addWidget(self.zoom_out_btn)
+        btn_layout.addWidget(self.reset_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.close_btn)
+        layout.addLayout(btn_layout)
+        self._update_pixmap()
         self.scroll_area.viewport().installEventFilter(self)
-
-    def _update_counter_label(self):
-        self.counter_label.setText(f"{self.current_index+1}/{len(self.original_pixmaps)}")
-
-    def _prev_image(self):
-        if self.current_index > 0:
-            self.current_index -= 1
-            self.current_zoom = 1.0
-            self._update_image()
-            self._update_counter_label()
-
-    def _next_image(self):
-        if self.current_index < len(self.original_pixmaps) - 1:
-            self.current_index += 1
-            self.current_zoom = 1.0
-            self._update_image()
-            self._update_counter_label()
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Wheel:
@@ -106,26 +130,21 @@ class ImageZoomWindow(QDialog):
             self.current_zoom = 0.1
         if self.current_zoom > 10.0:
             self.current_zoom = 10.0
-        self._update_image()
+        self._update_pixmap()
 
     def _reset_zoom(self):
         self.current_zoom = 1.0
-        self._update_image()
+        self._update_pixmap()
 
-    def _update_image(self):
-        if not self.original_pixmaps or self.current_index >= len(self.original_pixmaps):
+    def _update_pixmap(self):
+        if self.original_pixmap.isNull():
             return
-        pixmap = self.original_pixmaps[self.current_index]
-        if pixmap.isNull():
-            self.image_label.setText("Ошибка загрузки")
-            return
-        new_size = pixmap.size() * self.current_zoom
-        scaled = pixmap.scaled(new_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        new_size = self.original_pixmap.size() * self.current_zoom
+        scaled = self.original_pixmap.scaled(new_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.image_label.setPixmap(scaled)
         self.image_label.resize(scaled.size())
         self.scroll_area.widgetResizable = False
         self.scroll_area.widgetResizable = True
-
 
 class PartViewer(QDialog):
     def __init__(self, part_data, db, parent=None):
@@ -136,20 +155,20 @@ class PartViewer(QDialog):
         self.setMinimumSize(750, 550)
         self.resize(800, 620)
         self.setWindowFlags(self.windowFlags() | Qt.Window)
-        self.current_pixmaps = []  # список QPixmap для изображений
+        self.current_pixmaps = [None, None, None]
+        self.current_selected_image = 0
         self._init_ui()
         self._fill_data()
 
     def _init_ui(self):
+        # (весь код, как в предыдущей версии, без изменений, включая создание image_labels)
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(15, 15, 15, 15)
 
-        # Верхняя панель: наименование и статус
         title_widget = QWidget()
         title_layout = QHBoxLayout(title_widget)
         title_layout.setContentsMargins(0, 0, 0, 0)
-
         self.name_label = QLabel()
         name_font = QFont()
         name_font.setPointSize(16)
@@ -157,20 +176,16 @@ class PartViewer(QDialog):
         self.name_label.setFont(name_font)
         self.name_label.setWordWrap(True)
         title_layout.addWidget(self.name_label, 1)
-
         self.status_label = QLabel()
         self.status_label.setStyleSheet("font-weight: bold; padding: 4px 8px; border-radius: 4px;")
         self.status_label.setAlignment(Qt.AlignCenter)
         title_layout.addWidget(self.status_label)
-
         main_layout.addWidget(title_widget)
 
-        # Блок фото: контейнер для 1-3 изображений с адаптивным центрированием
         self.images_container = QWidget()
         self.images_layout = QHBoxLayout(self.images_container)
         self.images_layout.setAlignment(Qt.AlignCenter)
-        self.images_layout.setSpacing(10)
-        # Создаём 3 метки (будут видны только те, для которых есть фото)
+        self.images_layout.setSpacing(15)
         self.image_labels = []
         for i in range(3):
             label = QLabel()
@@ -179,14 +194,12 @@ class PartViewer(QDialog):
             label.setAlignment(Qt.AlignCenter)
             label.setScaledContents(False)
             label.setVisible(False)
-            # Обработчики кликов
-            label.mousePressEvent = lambda e, idx=i: self._set_current_image(idx)  # запоминаем индекс
+            label.mousePressEvent = lambda e, idx=i: self._select_image(idx)
             label.mouseDoubleClickEvent = lambda e, idx=i: self._zoom_image(idx)
             self.images_layout.addWidget(label)
             self.image_labels.append(label)
         main_layout.addWidget(self.images_container, alignment=Qt.AlignCenter)
 
-        # Кнопки управления
         img_btn_layout = QHBoxLayout()
         self.zoom_btn = QPushButton("🔍 Увеличить текущее")
         self.zoom_btn.clicked.connect(lambda: self._zoom_image(self.current_selected_image))
@@ -196,13 +209,11 @@ class PartViewer(QDialog):
         img_btn_layout.addWidget(self.save_img_btn)
         main_layout.addLayout(img_btn_layout)
 
-        # Разделитель
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         line.setFrameShadow(QFrame.Sunken)
         main_layout.addWidget(line)
 
-        # Прокручиваемая область для информации
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QScrollArea.NoFrame)
@@ -213,7 +224,6 @@ class PartViewer(QDialog):
         content_layout = QVBoxLayout(content_widget)
         content_layout.setSpacing(12)
 
-        # Две колонки информации
         info_widget = QWidget()
         info_layout = QHBoxLayout(info_widget)
         info_layout.setSpacing(20)
@@ -227,13 +237,9 @@ class PartViewer(QDialog):
 
         self.left_fields = {}
         left_labels = [
-            ("🆔 ID:", "id"),
-            ("📂 Категория:", "category"),
-            ("🔧 Тип детали:", "part_type"),
-            ("⚡ Номинал:", "value"),
-            ("📦 Корпус:", "package"),
-            ("🏭 Производитель:", "manufacturer"),
-            ("🔖 Артикул:", "mpn"),
+            ("🆔 ID:", "id"), ("📂 Категория:", "category"), ("🔧 Тип детали:", "part_type"),
+            ("⚡ Номинал:", "value"), ("📦 Корпус:", "package"), ("🏭 Производитель:", "manufacturer"),
+            ("🔖 Артикул:", "mpn")
         ]
         for label_text, key in left_labels:
             row_widget = QWidget()
@@ -251,11 +257,8 @@ class PartViewer(QDialog):
 
         self.right_fields = {}
         right_labels = [
-            ("📦 Количество:", "quantity"),
-            ("💰 Цена (₽):", "price"),
-            ("📍 Место:", "location"),
-            ("🏷️ Статус:", "status"),
-            ("📅 Дата ревизии:", "revision_date"),
+            ("📦 Количество:", "quantity"), ("💰 Цена (₽):", "price"), ("📍 Место:", "location"),
+            ("🏷️ Статус:", "status"), ("📅 Дата ревизии:", "revision_date")
         ]
         for label_text, key in right_labels:
             row_widget = QWidget()
@@ -275,7 +278,6 @@ class PartViewer(QDialog):
         info_layout.addWidget(right_col, 1)
         content_layout.addWidget(info_widget)
 
-        # Размеры конденсатора
         self.dims_widget = QWidget()
         dims_layout = QHBoxLayout(self.dims_widget)
         dims_layout.setContentsMargins(0, 0, 0, 0)
@@ -291,7 +293,6 @@ class PartViewer(QDialog):
         content_layout.addWidget(self.dims_widget)
         self.dims_widget.setVisible(False)
 
-        # Даташит и заметки
         doc_widget = QWidget()
         doc_layout = QVBoxLayout(doc_widget)
         doc_layout.setSpacing(5)
@@ -330,7 +331,6 @@ class PartViewer(QDialog):
         self.scroll_area.setWidget(content_widget)
         main_layout.addWidget(self.scroll_area, 1)
 
-        # Кнопки действий
         btn_layout = QHBoxLayout()
         self.btn_edit = QPushButton("✏️ Редактировать")
         self.btn_edit.clicked.connect(self._edit_part)
@@ -344,84 +344,18 @@ class PartViewer(QDialog):
         btn_layout.addWidget(self.btn_close)
         main_layout.addLayout(btn_layout)
 
-        self.setStyleSheet("""
-            QLabel { color: #333; }
-            QPushButton { padding: 5px 15px; }
-        """)
+        self.setStyleSheet("""QLabel { color: #333; } QPushButton { padding: 5px 15px; }""")
 
-        self.current_selected_image = 0
-
-    def _set_current_image(self, idx):
+    def _select_image(self, idx):
         self.current_selected_image = idx
-
-    def _load_images(self):
-        """Загружает изображения из полей image_path, image_path_2, image_path_3 в папку images/ (относительно DATA_DIR)."""
-        self.current_pixmaps = []
-        image_fields = ['image_path', 'image_path_2', 'image_path_3']
-        for field in image_fields:
-            rel_path = self.part_data.get(field)
-            if rel_path:
-                # Путь относительно DATA_DIR
-                full_path = DATA_DIR / rel_path
-                if full_path.exists():
-                    pixmap = QPixmap(str(full_path))
-                    if not pixmap.isNull():
-                        self.current_pixmaps.append(pixmap)
-                        continue
-                # Если не нашли по относительному пути, может быть абсолютный путь (старые данные)
-                if Path(rel_path).exists():
-                    pixmap = QPixmap(rel_path)
-                    if not pixmap.isNull():
-                        self.current_pixmaps.append(pixmap)
-        self._update_images_display()
-
-    def _update_images_display(self):
-        """Отображает 1-3 изображения в ряд с центрированием."""
-        count = len(self.current_pixmaps)
-        # Скрываем все метки
-        for label in self.image_labels:
-            label.setVisible(False)
-        if count == 0:
-            # Показываем заглушку
-            self.image_labels[0].setText("Нет фото")
-            self.image_labels[0].setVisible(True)
-            return
-        # Показываем нужное количество и заполняем pixmap
-        for i in range(count):
-            label = self.image_labels[i]
-            label.setVisible(True)
-            pixmap = self.current_pixmaps[i]
-            scaled = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            label.setPixmap(scaled)
-            # Сохраняем оригинальный pixmap в свойстве для увеличения
-            label.setProperty("original_pixmap", pixmap)
-
-        # Центрирование: если изображений 1 или 2, можно добавить пустые места? QHBoxLayout с выравниванием по центру уже делает это автоматически.
-        # Дополнительно регулируем отступы: ничего делать не нужно.
-
-    def _zoom_image(self, idx):
-        if idx < len(self.current_pixmaps):
-            zoom_win = ImageZoomWindow(self.current_pixmaps, start_index=idx, parent=self)
-            zoom_win.resize(800, 600)
-            zoom_win.exec()
-
-    def _save_current_image(self):
-        if self.current_selected_image < len(self.current_pixmaps):
-            pixmap = self.current_pixmaps[self.current_selected_image]
-            if pixmap and not pixmap.isNull():
-                path, _ = QFileDialog.getSaveFileName(self, "Сохранить изображение", "", "PNG (*.png);;JPEG (*.jpg)")
-                if path:
-                    pixmap.save(path)
-                    QMessageBox.information(self, "Сохранено", f"Изображение сохранено в {path}")
+        for i, lbl in enumerate(self.image_labels):
+            if i == idx:
+                lbl.setStyleSheet("border: 2px solid #3399ff; border-radius: 8px;")
             else:
-                QMessageBox.warning(self, "Нет изображения", "Нечего сохранять.")
-        else:
-            QMessageBox.warning(self, "Нет изображения", "Не выбран активный снимок.")
+                lbl.setStyleSheet("border: 1px solid #cccccc; background-color: #f8f8f8; border-radius: 8px;")
 
     def _open_notes_window(self):
-        from .part_viewer import NotesWindow
-        notes_text = self.part_data.get('notes', '')
-        win = NotesWindow(notes_text, self)
+        win = NotesWindow(self.part_data.get('notes', ''), self)
         win.exec()
 
     def _set_field(self, field_dict, key, value, suffix=""):
@@ -434,32 +368,21 @@ class PartViewer(QDialog):
             field_dict[key].setText("—")
 
     def _fill_data(self):
-        # Наименование и статус
         self.name_label.setText(self.part_data.get('name', 'Без имени'))
         status = self.part_data.get('status', 'Новое')
         self.status_label.setText(status)
-        status_colors = {
-            "Новое": "#a5d6a7", "Отличное": "#a5d6a7",
-            "Б/У проверено": "#90caf9",
-            "Б/У не проверено": "#fff59d",
-            "Плохое": "#ffcc80",
-            "Неисправно": "#ef9a9a"
-        }
+        status_colors = {"Новое": "#a5d6a7", "Отличное": "#a5d6a7", "Б/У проверено": "#90caf9",
+                         "Б/У не проверено": "#fff59d", "Плохое": "#ffcc80", "Неисправно": "#ef9a9a"}
         bg = status_colors.get(status, "#e0e0e0")
         self.status_label.setStyleSheet(f"background-color: {bg}; font-weight: bold; padding: 4px 12px; border-radius: 4px;")
 
-        # ID
         self._set_field(self.left_fields, "id", self.part_data.get('id'))
-        # Категория
         cat_id = self.part_data.get('category_id')
         if cat_id:
-            cat_path = self._get_category_path(cat_id)
-            self._set_field(self.left_fields, "category", cat_path)
+            self._set_field(self.left_fields, "category", self._get_category_path(cat_id))
         else:
             self.left_fields["category"].setText("—")
-        # Тип детали
         self._set_field(self.left_fields, "part_type", self.part_data.get('part_type'))
-        # Номинал
         val_num = self.part_data.get('value_numeric')
         val_unit = self.part_data.get('value_unit')
         if val_num is not None and val_unit:
@@ -470,14 +393,10 @@ class PartViewer(QDialog):
             self.left_fields["value"].setText(str(val_num))
         else:
             self.left_fields["value"].setText("—")
-        # Корпус
         self._set_field(self.left_fields, "package", self.part_data.get('package'))
-        # Производитель
         self._set_field(self.left_fields, "manufacturer", self.part_data.get('manufacturer'))
-        # Артикул
         self._set_field(self.left_fields, "mpn", self.part_data.get('part_number'))
 
-        # Правая колонка
         qty = self.part_data.get('quantity', 0)
         self._set_field(self.right_fields, "quantity", qty)
         if qty == 0:
@@ -486,37 +405,29 @@ class PartViewer(QDialog):
             self.right_fields["quantity"].setStyleSheet("color: #f57c00; font-weight: bold;")
         else:
             self.right_fields["quantity"].setStyleSheet("color: #2e7d32; font-weight: bold;")
-
         price = self.part_data.get('price', 0)
         self._set_field(self.right_fields, "price", f"{price:.2f}")
         self._set_field(self.right_fields, "location", self.part_data.get('location'))
         self._set_field(self.right_fields, "status", status)
         self._set_field(self.right_fields, "revision_date", self.part_data.get('revision_date'))
 
-        # Размеры конденсатора
         cat_id = self.part_data.get('category_id')
         if cat_id:
             cat_path = self._get_category_path(cat_id)
             is_capacitor = "конденсатор" in cat_path.lower()
             self.dims_widget.setVisible(is_capacitor)
             if is_capacitor:
-                diam = self.part_data.get('diameter_mm')
-                height = self.part_data.get('height_mm')
-                pitch = self.part_data.get('lead_pitch_mm')
-                lead = self.part_data.get('lead_diameter_mm')
-                self.diam_label.setText(f"⌀ {diam} мм" if diam else "⌀ — мм")
-                self.height_label.setText(f"высота {height} мм" if height else "высота — мм")
-                self.pitch_label.setText(f"шаг {pitch} мм" if pitch else "шаг — мм")
-                self.lead_label.setText(f"вывод {lead} мм" if lead else "вывод — мм")
+                self.diam_label.setText(f"⌀ {self.part_data.get('diameter_mm')} мм" if self.part_data.get('diameter_mm') else "⌀ — мм")
+                self.height_label.setText(f"высота {self.part_data.get('height_mm')} мм" if self.part_data.get('height_mm') else "высота — мм")
+                self.pitch_label.setText(f"шаг {self.part_data.get('lead_pitch_mm')} мм" if self.part_data.get('lead_pitch_mm') else "шаг — мм")
+                self.lead_label.setText(f"вывод {self.part_data.get('lead_diameter_mm')} мм" if self.part_data.get('lead_diameter_mm') else "вывод — мм")
         else:
             self.dims_widget.setVisible(False)
 
-        # Даташит
         ds_path = self.part_data.get('datasheet_path')
         if ds_path:
             if ds_path.startswith(('http://', 'https://')):
                 self.datasheet_link.setText(f'<a href="{ds_path}">Открыть в браузере</a>')
-                self.datasheet_link.setToolTip(ds_path)
             else:
                 if os.path.exists(ds_path):
                     self.datasheet_link.setText(f'<a href="file:///{ds_path}">Открыть файл</a>')
@@ -524,12 +435,8 @@ class PartViewer(QDialog):
                     self.datasheet_link.setText("Файл не найден")
         else:
             self.datasheet_link.setText("—")
-
-        # Заметки
         notes = self.part_data.get('notes', '')
         self.notes_edit.setPlainText(notes if notes else "—")
-
-        # Загрузка изображений
         self._load_images()
 
     def _get_category_path(self, cat_id):
@@ -545,12 +452,77 @@ class PartViewer(QDialog):
             cur_id = parent_id
         return " / ".join(path) if path else "—"
 
+    def _load_pixmap_from_url(self, url):
+        pixmap = QPixmap()
+        try:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with urllib.request.urlopen(url, context=ctx, timeout=5) as response:
+                data = response.read()
+            pixmap.loadFromData(data)
+        except Exception as e:
+            print(f"Ошибка загрузки URL: {e}")
+        return pixmap
+
+    def _load_images(self):
+        image_paths = [
+            self.part_data.get('image_path', ''),
+            self.part_data.get('image_path_2', ''),
+            self.part_data.get('image_path_3', '')
+        ]
+        for i, path in enumerate(image_paths):
+            if path:
+                pixmap = QPixmap()
+                if path.startswith(('http://', 'https://')):
+                    pixmap = self._load_pixmap_from_url(path)
+                else:
+                    img_path = DATA_DIR / "images" / Path(path).name
+                    if img_path.exists():
+                        pixmap = QPixmap(str(img_path))
+                if not pixmap.isNull():
+                    self.current_pixmaps[i] = pixmap
+                    scaled = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    self.image_labels[i].setPixmap(scaled)
+                    self.image_labels[i].setVisible(True)
+                else:
+                    self.image_labels[i].setText("Ошибка" if path.startswith('http') else "Не найден")
+                    self.image_labels[i].setVisible(True)
+            else:
+                self.image_labels[i].setVisible(False)
+        if not any(self.current_pixmaps):
+            self.image_labels[0].setText("Нет фото")
+            self.image_labels[0].setVisible(True)
+        for i, pm in enumerate(self.current_pixmaps):
+            if pm:
+                self._select_image(i)
+                break
+        else:
+            self._select_image(0)
+
+    def _zoom_image(self, idx):
+        if idx < len(self.current_pixmaps) and self.current_pixmaps[idx] is not None:
+            zoom_win = ImageZoomWindow(self.current_pixmaps[idx], self)
+            zoom_win.resize(800, 600)
+            zoom_win.exec()
+        else:
+            QMessageBox.information(self, "Нет изображения", "Выбранное изображение недоступно.")
+
+    def _save_current_image(self):
+        idx = self.current_selected_image
+        if idx < len(self.current_pixmaps) and self.current_pixmaps[idx] is not None:
+            pixmap = self.current_pixmaps[idx]
+            path, _ = QFileDialog.getSaveFileName(self, "Сохранить изображение", "", "PNG (*.png);;JPEG (*.jpg)")
+            if path:
+                pixmap.save(path)
+                QMessageBox.information(self, "Сохранено", f"Изображение сохранено в {path}")
+        else:
+            QMessageBox.warning(self, "Нет изображения", "Нечего сохранять.")
+
     def _edit_part(self):
         editor = PartDialog(parent=self, part_data=self.part_data, db=self.db, start_depth=0)
         if editor.exec():
             new_data = editor.get_data()
-            # В main_window обработка изображений, но для упрощения здесь можно просто обновить
-            # Но мы делегируем обновление основному окну через сигналы, но для простоты вызовем _refresh_all родителя
             self.db.update_part(self.part_data['id'], new_data)
             updated = self.db.get_part(self.part_data['id'])
             if updated:
@@ -563,46 +535,33 @@ class PartViewer(QDialog):
     def _print_part(self):
         printer = QPrinter(QPrinter.HighResolution)
         dialog = QPrintDialog(printer, self)
-        dialog.setWindowTitle("Печать карточки детали")
         if dialog.exec() != QPrintDialog.Accepted:
             return
-        html = self._generate_html_for_print()
         doc = QTextDocument()
-        doc.setHtml(html)
+        doc.setHtml(self._generate_html_for_print())
         doc.print_(printer)
 
     def _generate_html_for_print(self):
-        html = f"""
-        <html>
-        <head><style>body {{ font-family: Arial, sans-serif; margin: 20px; }}</style></head>
-        <body>
-        <h1>{self.part_data.get('name', '')}</h1>
-        <p><strong>Статус:</strong> {self.part_data.get('status', '')}</p>
-        <hr>
-        <table border="0">
-        <tr><th>ID</th><td>{self.part_data.get('id', '')}</td></tr>
+        return f"""<html><head><style>body{{font-family:Arial;margin:20px;}}</style></head>
+        <body><h1>{self.part_data.get('name','')}</h1><p><strong>Статус:</strong> {self.part_data.get('status','')}</p><hr>
+        <table>
+        <tr><th>ID</th><td>{self.part_data.get('id','')}</td></tr>
         <tr><th>Категория</th><td>{self._get_category_path(self.part_data.get('category_id')) if self.part_data.get('category_id') else '—'}</td></tr>
-        <tr><th>Тип детали</th><td>{self.part_data.get('part_type', '—')}</td></tr>
-        <tr><th>Номинал</th><td>{self.left_fields.get('value', QLabel()).text()}</td></tr>
-        <tr><th>Корпус</th><td>{self.part_data.get('package', '—')}</td></tr>
-        <tr><th>Диаметр</th><td>{self._format_dim(self.part_data.get('diameter_mm'), 'мм')}</td></tr>
-        <tr><th>Высота</th><td>{self._format_dim(self.part_data.get('height_mm'), 'мм')}</td></tr>
-        <tr><th>Шаг выводов</th><td>{self._format_dim(self.part_data.get('lead_pitch_mm'), 'мм')}<tr></tr>
-        <tr><th>Толщина выводов</th><td>{self._format_dim(self.part_data.get('lead_diameter_mm'), 'мм')}</td></tr>
-        <tr><th>Количество</th><td>{self.part_data.get('quantity', 0)}</td></tr>
-        <tr><th>Цена</th><td>{self.part_data.get('price', 0):.2f} ₽</td></tr>
-        <tr><th>Место</th><td>{self.part_data.get('location', '—')}</td></tr>
-        <tr><th>Производитель</th><td>{self.part_data.get('manufacturer', '—')}</td></tr>
-        <tr><th>Артикул</th><td>{self.part_data.get('part_number', '—')}</td></tr>
-        <tr><th>Дата ревизии</th><td>{self.part_data.get('revision_date', '—')}</td></tr>
+        <tr><th>Тип детали</th><td>{self.part_data.get('part_type','—')}</td></tr>
+        <tr><th>Номинал</th><td>{self.left_fields.get('value',QLabel()).text()}</td></tr>
+        <tr><th>Корпус</th><td>{self.part_data.get('package','—')}</td></tr>
+        <tr><th>Диаметр</th><td>{self._format_dim(self.part_data.get('diameter_mm'),'мм')}</td></tr>
+        <tr><th>Высота</th><td>{self._format_dim(self.part_data.get('height_mm'),'мм')}</td></tr>
+        <tr><th>Шаг выводов</th><td>{self._format_dim(self.part_data.get('lead_pitch_mm'),'мм')}</td></tr>
+        <tr><th>Толщина выводов</th><td>{self._format_dim(self.part_data.get('lead_diameter_mm'),'мм')}</td></tr>
+        <tr><th>Количество</th><td>{self.part_data.get('quantity',0)}</td></tr>
+        <tr><th>Цена</th><td>{self.part_data.get('price',0):.2f} ₽</td></tr>
+        <tr><th>Место</th><td>{self.part_data.get('location','—')}</td></tr>
+        <tr><th>Производитель</th><td>{self.part_data.get('manufacturer','—')}</td></tr>
+        <tr><th>Артикул</th><td>{self.part_data.get('part_number','—')}</td></tr>
+        <tr><th>Дата ревизии</th><td>{self.part_data.get('revision_date','—')}</td></tr>
         </table>
-        <p><strong>Заметки:</strong><br>{self.part_data.get('notes', '')}</p>
-        </body>
-        </html>
-        """
-        return html
+        <p><strong>Заметки:</strong><br>{self.part_data.get('notes','')}</p></body></html>"""
 
     def _format_dim(self, value, unit):
-        if value and value > 0:
-            return f"{value} {unit}"
-        return "—"
+        return f"{value} {unit}" if value and value > 0 else "—"

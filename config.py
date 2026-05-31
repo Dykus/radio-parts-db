@@ -16,3 +16,6 @@ BACKUP_DIR.mkdir(exist_ok=True)
 # Настройки автобэкапа
 ENABLE_AUTO_BACKUP = True
 BACKUP_COUNT = 5
+
+# Файл настроек окна и прочего
+SETTINGS_FILE = "window_settings.json"
