@@ -7,10 +7,11 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox,
     QDateTimeEdit, QTextEdit, QDialogButtonBox, QMessageBox, QFileDialog,
-    QWidget, QHBoxLayout, QPushButton, QLabel, QScrollArea, QFrame, QVBoxLayout
+    QWidget, QHBoxLayout, QPushButton, QLabel, QScrollArea, QFrame, QVBoxLayout,
+    QTabWidget, QGroupBox, QSplitter
 )
 from PySide6.QtCore import Qt, QDate
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QFont
 from ui.dialogs.category_selector import CategorySelectorDialog
 from config import DATA_DIR
 
@@ -20,55 +21,78 @@ try:
     PILLOW_AVAILABLE = True
 except ImportError:
     PILLOW_AVAILABLE = False
-    logger = logging.getLogger(__name__)
-    logger.warning("Pillow не установлен. Сжатие изображений отключено. Установите: pip install Pillow")
+    logging.getLogger(__name__).warning("Pillow не установлен. Сжатие изображений отключено. Установите: pip install Pillow")
 
 logger = logging.getLogger(__name__)
 
+
 class PartDialog(QDialog):
+    """Диалог редактирования/добавления компонента.
+    Три вкладки: Основная информация, Изображения и даташит, Заметки."""
+
     def __init__(self, parent=None, part_data=None, db=None, start_depth=0):
         super().__init__(parent)
         self.db = db
         self.part_data = part_data
         self.start_depth = start_depth
+        self.notes_font_size = 10  # размер шрифта заметок по умолчанию
         self.setWindowTitle("✏️ Редактирование компонента")
-        self.setMinimumWidth(700)
+        self.setMinimumSize(820, 580)
+        self.resize(860, 640)
         self.image_widgets = []  # список (frame, file_path) для выбранных локальных изображений
         self._init_ui()
         if part_data:
             self._fill_form(part_data)
 
     def _init_ui(self):
-        layout = QFormLayout(self)
-        layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        # ===== QTabWidget: 3 вкладки =====
+        self.tabs = QTabWidget()
+
+        # ====================================================================
+        # ВКЛАДКА 1: Основная информация + две колонки
+        # ====================================================================
+        tab1_widget = QWidget()
+        tab1_layout = QVBoxLayout(tab1_widget)
+        tab1_layout.setContentsMargins(8, 8, 8, 8)
+        tab1_layout.setSpacing(8)
+
+        # --- Блок «Основная информация» на всю ширину ---
+        basic_group = QGroupBox("📋 Основная информация")
+        basic_form = QFormLayout(basic_group)
+        basic_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        basic_form.setSpacing(8)
 
         # Наименование
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Можно ввести вручную или нажать «Собрать название»")
-        layout.addRow("Наименование *", self.name_edit)
+        basic_form.addRow("Наименование *", self.name_edit)
 
         # Категория
-        category_widget = QWidget()
-        category_layout = QHBoxLayout(category_widget)
-        category_layout.setContentsMargins(0, 0, 0, 0)
-        category_layout.setSpacing(5)
+        cat_widget = QWidget()
+        cat_layout = QHBoxLayout(cat_widget)
+        cat_layout.setContentsMargins(0, 0, 0, 0)
+        cat_layout.setSpacing(5)
         self.category_edit = QLineEdit()
         self.category_edit.setPlaceholderText("Выберите категорию")
         self.category_edit.setReadOnly(True)
         self.btn_select_category = QPushButton("📂 ...")
         self.btn_select_category.setMaximumWidth(40)
         self.btn_select_category.clicked.connect(self._open_category_selector)
-        category_layout.addWidget(self.category_edit)
-        category_layout.addWidget(self.btn_select_category)
-        layout.addRow("Категория", category_widget)
+        cat_layout.addWidget(self.category_edit)
+        cat_layout.addWidget(self.btn_select_category)
+        basic_form.addRow("Категория", cat_widget)
 
         # Тип детали
         self.part_type_combo = QComboBox()
         self.part_type_combo.setEditable(True)
         self.part_type_combo.setPlaceholderText("Введите или выберите тип детали")
-        layout.addRow("Тип детали", self.part_type_combo)
+        basic_form.addRow("Тип детали", self.part_type_combo)
 
-        # Номинал
+        # Номинал / значение
         nominal_widget = QWidget()
         nominal_layout = QHBoxLayout(nominal_widget)
         nominal_layout.setContentsMargins(0, 0, 0, 0)
@@ -81,126 +105,139 @@ class PartDialog(QDialog):
         self.unit_combo.setMinimumWidth(80)
         nominal_layout.addWidget(self.value_edit)
         nominal_layout.addWidget(self.unit_combo)
-        layout.addRow("Номинал / значение", nominal_widget)
+        basic_form.addRow("Номинал / значение", nominal_widget)
 
-        # Кнопка сборки названия
-        self.btn_assemble = QPushButton("🧩 Собрать название")
+        # Кнопка «Собрать название»
+        self.btn_assemble = QPushButton(" Собрать название")
         self.btn_assemble.clicked.connect(self._assemble_name)
-        layout.addRow("", self.btn_assemble)
+        basic_form.addRow("", self.btn_assemble)
 
-        # Корпус
+        tab1_layout.addWidget(basic_group)
+
+        # --- Сплиттер с двумя колонками ---
+        splitter = QSplitter(Qt.Horizontal)
+
+        # Левая колонка: Характеристики + Производитель + Габариты
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(6)
+
+        specs_group = QGroupBox("⚙️ Характеристики")
+        specs_form = QFormLayout(specs_group)
+        specs_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+
         self.package_combo = QComboBox()
         self.package_combo.setEditable(True)
         self.package_combo.addItems(["", "0402", "0603", "0805", "1206", "SOT-23", "SOIC-8", "DIP-8", "TQFP-48", "TO-92", "TO-220"])
-        layout.addRow("Корпус", self.package_combo)
+        specs_form.addRow("Корпус", self.package_combo)
 
-        # Размеры для конденсаторов (изначально скрыты)
-        self.dims_group = QWidget()
-        dims_layout = QFormLayout(self.dims_group)
-        dims_layout.setContentsMargins(0, 0, 0, 0)
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(["Новое", "Б/У проверено", "Б/У не проверено", "Отличное", "Хорошее", "Плохое", "Неисправно"])
+        self.status_combo.setCurrentText("Новое")
+        specs_form.addRow("Состояние", self.status_combo)
+
+        self.part_number_edit = QLineEdit()
+        specs_form.addRow("Артикул", self.part_number_edit)
+        left_layout.addWidget(specs_group)
+
+        manuf_group = QGroupBox("🏭 Производитель")
+        manuf_form = QFormLayout(manuf_group)
+        self.manufacturer_combo = QComboBox()
+        self.manufacturer_combo.setEditable(True)
+        self.manufacturer_combo.setPlaceholderText("Введите или выберите производителя")
+        manuf_form.addRow("Производитель", self.manufacturer_combo)
+        left_layout.addWidget(manuf_group)
+
+        # Сворачиваемая группа «Габариты конденсаторов»
+        self.dims_group = QGroupBox("📏 Габариты (для конденсаторов)")
+        self.dims_group.setCheckable(True)
+        self.dims_group.setChecked(False)
+        self.dims_group.setVisible(False)  # скрыта по умолчанию, показывается для конденсаторов
+        dims_form = QFormLayout(self.dims_group)
+        dims_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+
         self.diameter_spin = QDoubleSpinBox()
         self.diameter_spin.setRange(0, 100)
         self.diameter_spin.setDecimals(1)
         self.diameter_spin.setSuffix(" мм")
-        dims_layout.addRow("Диаметр (мм)", self.diameter_spin)
+        dims_form.addRow("Диаметр (мм)", self.diameter_spin)
+
         self.height_spin = QDoubleSpinBox()
         self.height_spin.setRange(0, 200)
         self.height_spin.setDecimals(1)
         self.height_spin.setSuffix(" мм")
-        dims_layout.addRow("Высота (мм)", self.height_spin)
+        dims_form.addRow("Высота (мм)", self.height_spin)
+
         self.lead_pitch_spin = QDoubleSpinBox()
         self.lead_pitch_spin.setRange(0, 50)
         self.lead_pitch_spin.setDecimals(1)
         self.lead_pitch_spin.setSuffix(" мм")
-        dims_layout.addRow("Шаг выводов (мм)", self.lead_pitch_spin)
+        dims_form.addRow("Шаг выводов (мм)", self.lead_pitch_spin)
+
         self.lead_diameter_spin = QDoubleSpinBox()
         self.lead_diameter_spin.setRange(0, 5)
         self.lead_diameter_spin.setDecimals(2)
         self.lead_diameter_spin.setSuffix(" мм")
-        dims_layout.addRow("Толщина выводов (мм)", self.lead_diameter_spin)
-        layout.addRow("Габариты (для конденсаторов)", self.dims_group)
-        self.dims_group.setVisible(False)
+        dims_form.addRow("Толщина выводов (мм)", self.lead_diameter_spin)
+        left_layout.addWidget(self.dims_group)
 
-        # Состояние
-        self.status_combo = QComboBox()
-        self.status_combo.addItems(["Новое", "Б/У проверено", "Б/У не проверено", "Отличное", "Хорошее", "Плохое", "Неисправно"])
-        self.status_combo.setCurrentText("Новое")
-        layout.addRow("Состояние", self.status_combo)
+        left_layout.addStretch()
+        splitter.addWidget(left_widget)
 
-        # Производитель
-        self.manufacturer_combo = QComboBox()
-        self.manufacturer_combo.setEditable(True)
-        self.manufacturer_combo.setPlaceholderText("Введите или выберите производителя")
-        layout.addRow("Производитель", self.manufacturer_combo)
+        # Правая колонка: Склад
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(6)
 
-        # Артикул
-        self.part_number_edit = QLineEdit()
-        layout.addRow("Артикул", self.part_number_edit)
+        stock_group = QGroupBox("📦 Склад и количество")
+        stock_form = QFormLayout(stock_group)
+        stock_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
-        # Количество и цена
-        qty_price_layout = QHBoxLayout()
+        qty_price_widget = QWidget()
+        qty_price_layout = QHBoxLayout(qty_price_widget)
+        qty_price_layout.setContentsMargins(0, 0, 0, 0)
+        qty_price_layout.setSpacing(5)
         self.quantity_spin = QSpinBox()
         self.quantity_spin.setRange(0, 999999)
         self.price_spin = QDoubleSpinBox()
         self.price_spin.setRange(0, 999999.99)
         self.price_spin.setDecimals(2)
-        self.price_spin.setPrefix("₽ ")
+        self.price_spin.setPrefix("₽  ")
         qty_price_layout.addWidget(self.quantity_spin)
         qty_price_layout.addWidget(self.price_spin)
-        layout.addRow("Кол-во / Цена", qty_price_layout)
+        stock_form.addRow("Кол-во / Цена", qty_price_widget)
 
-        # Место хранения
-        location_widget = QWidget()
-        location_layout = QHBoxLayout(location_widget)
-        location_layout.setContentsMargins(0, 0, 0, 0)
-        location_layout.setSpacing(5)
+        # Место хранения: 4 комбобокса в строку
+        place_widget = QWidget()
+        place_layout = QHBoxLayout(place_widget)
+        place_layout.setContentsMargins(0, 0, 0, 0)
+        place_layout.setSpacing(4)
         self.location_place_combo = QComboBox()
         self.location_place_combo.setEditable(True)
         self.location_place_combo.setPlaceholderText("Место")
         self.location_place_combo.addItems(["", "Дом", "Контора", "Гараж", "Склад"])
         self.location_place_combo.currentTextChanged.connect(self._update_location_containers)
+
         self.location_container_combo = QComboBox()
         self.location_container_combo.setEditable(True)
         self.location_container_combo.setPlaceholderText("Контейнер")
         self.location_container_combo.currentTextChanged.connect(self._update_location_shelves)
+
         self.location_shelf_combo = QComboBox()
         self.location_shelf_combo.setEditable(True)
         self.location_shelf_combo.setPlaceholderText("Полка/Ящик")
         self.location_shelf_combo.currentTextChanged.connect(self._update_location_sections)
+
         self.location_section_combo = QComboBox()
         self.location_section_combo.setEditable(True)
         self.location_section_combo.setPlaceholderText("Секция/№")
-        location_layout.addWidget(self.location_place_combo)
-        location_layout.addWidget(self.location_container_combo)
-        location_layout.addWidget(self.location_shelf_combo)
-        location_layout.addWidget(self.location_section_combo)
-        layout.addRow("Место хранения", location_widget)
 
-        # Изображения (только локальные файлы, URL не показываем превью)
-        img_widget = QWidget()
-        img_layout = QVBoxLayout(img_widget)
-        img_layout.setContentsMargins(0, 0, 0, 0)
-        self.img_btn = QPushButton("📷 Добавить локальные изображения (до 3)")
-        self.img_btn.clicked.connect(self._add_images)
-        img_layout.addWidget(self.img_btn)
-        self.img_container = QWidget()
-        self.img_container_layout = QHBoxLayout(self.img_container)
-        self.img_container_layout.setSpacing(10)
-        self.img_container_layout.setContentsMargins(0, 0, 0, 0)
-        img_layout.addWidget(self.img_container)
-        layout.addRow("Изображения", img_widget)
-
-        # Даташит
-        datasheet_widget = QWidget()
-        datasheet_layout = QHBoxLayout(datasheet_widget)
-        datasheet_layout.setContentsMargins(0, 0, 0, 0)
-        datasheet_layout.setSpacing(5)
-        self.datasheet_path_edit = QLineEdit()
-        self.datasheet_btn = QPushButton("📄 Обзор...")
-        self.datasheet_btn.clicked.connect(lambda: self._browse_file(self.datasheet_path_edit, "PDF (*.pdf)"))
-        datasheet_layout.addWidget(self.datasheet_path_edit)
-        datasheet_layout.addWidget(self.datasheet_btn)
-        layout.addRow("Даташит", datasheet_widget)
+        for cb in [self.location_place_combo, self.location_container_combo,
+                   self.location_shelf_combo, self.location_section_combo]:
+            place_layout.addWidget(cb)
+        stock_form.addRow("Место хранения", place_widget)
 
         # Дата ревизии
         revision_widget = QWidget()
@@ -213,21 +250,214 @@ class PartDialog(QDialog):
         today_btn.clicked.connect(lambda: self.revision_date.setDate(QDate.currentDate()))
         revision_layout.addWidget(self.revision_date)
         revision_layout.addWidget(today_btn)
-        layout.addRow("Дата ревизии", revision_widget)
+        stock_form.addRow("Дата ревизии", revision_widget)
 
-        # Заметки
+        right_layout.addWidget(stock_group)
+        right_layout.addStretch()
+
+        splitter.addWidget(right_widget)
+        splitter.setSizes([380, 380])
+        tab1_layout.addWidget(splitter, 1)  # растягивается
+
+        self.tabs.addTab(tab1_widget, "📋 Основная информация")
+
+        # ====================================================================
+        # ВКЛАДКА 2: Изображения и даташит
+        # ====================================================================
+        tab2_widget = QWidget()
+        tab2_layout = QVBoxLayout(tab2_widget)
+        tab2_layout.setContentsMargins(12, 12, 12, 12)
+        tab2_layout.setSpacing(12)
+
+        # --- Изображения ---
+        img_group = QGroupBox(" Изображения (до 3)")
+        img_layout = QVBoxLayout(img_group)
+        img_layout.setSpacing(8)
+
+        img_info = QLabel("Можно добавить до 3 локальных изображений. Они будут сжаты в WebP.")
+        img_info.setStyleSheet("color: #666; font-style: italic;")
+        img_layout.addWidget(img_info)
+
+        self.img_btn = QPushButton("📷 Добавить локальные изображения")
+        self.img_btn.setMinimumHeight(30)
+        self.img_btn.clicked.connect(self._add_images)
+        img_layout.addWidget(self.img_btn)
+
+        img_preview_widget = QWidget()
+        self.img_container_layout = QHBoxLayout(img_preview_widget)
+        self.img_container_layout.setSpacing(15)
+        self.img_container_layout.setAlignment(Qt.AlignCenter)
+        img_layout.addWidget(img_preview_widget)
+        img_layout.addStretch()
+
+        self.img_container = img_preview_widget  # для обратной совместимости с методами работы с картинками
+        tab2_layout.addWidget(img_group, 1)
+
+        # --- Даташит ---
+        ds_group = QGroupBox("📄 Даташит")
+        ds_layout = QVBoxLayout(ds_group)
+        ds_layout.setSpacing(6)
+
+        ds_info = QLabel("Укажите путь к PDF-файлу даташита. Можно выбрать локальный файл.")
+        ds_info.setStyleSheet("color: #666; font-style: italic;")
+        ds_info.setWordWrap(True)
+        ds_layout.addWidget(ds_info)
+
+        ds_path_widget = QWidget()
+        ds_path_layout = QHBoxLayout(ds_path_widget)
+        ds_path_layout.setContentsMargins(0, 0, 0, 0)
+        self.datasheet_path_edit = QLineEdit()
+        self.datasheet_path_edit.setPlaceholderText("Путь к PDF...")
+        self.datasheet_btn = QPushButton("📄 Обзор...")
+        self.datasheet_btn.clicked.connect(lambda: self._browse_file(self.datasheet_path_edit, "PDF (*.pdf)"))
+        ds_path_layout.addWidget(self.datasheet_path_edit)
+        ds_path_layout.addWidget(self.datasheet_btn)
+        ds_layout.addWidget(ds_path_widget)
+
+        tab2_layout.addWidget(ds_group, 1)
+
+        self.tabs.addTab(tab2_widget, "📷 Изображения и даташит")
+
+        # ====================================================================
+        # ВКЛАДКА 3: Заметки с управлением шрифтом
+        # ====================================================================
+        tab3_widget = QWidget()
+        tab3_layout = QVBoxLayout(tab3_widget)
+        tab3_layout.setContentsMargins(12, 12, 12, 12)
+
+        # Toolbar для шрифта заметок
+        notes_toolbar = QWidget()
+        notes_toolbar_layout = QHBoxLayout(notes_toolbar)
+        notes_toolbar_layout.setContentsMargins(0, 0, 0, 5)
+
+        self.notes_font_size_label = QLabel("Размер шрифта:")
+        self.notes_font_decrease_btn = QPushButton("A-")
+        self.notes_font_decrease_btn.setFixedSize(32, 24)
+        self.notes_font_decrease_btn.clicked.connect(lambda: self._change_notes_font(-1))
+
+        self.notes_font_size_display = QLabel(str(self.notes_font_size))
+        self.notes_font_size_display.setMinimumWidth(30)
+        self.notes_font_size_display.setAlignment(Qt.AlignCenter)
+        self.notes_font_size_display.setStyleSheet("font-weight: bold;")
+
+        self.notes_font_increase_btn = QPushButton("A+")
+        self.notes_font_increase_btn.setFixedSize(32, 24)
+        self.notes_font_increase_btn.clicked.connect(lambda: self._change_notes_font(1))
+
+        self.notes_font_reset_btn = QPushButton("🔄 Сброс")
+        self.notes_font_reset_btn.clicked.connect(lambda: self._reset_notes_font())
+
+        notes_toolbar_layout.addWidget(self.notes_font_size_label)
+        notes_toolbar_layout.addWidget(self.notes_font_decrease_btn)
+        notes_toolbar_layout.addWidget(self.notes_font_size_display)
+        notes_toolbar_layout.addWidget(self.notes_font_increase_btn)
+        notes_toolbar_layout.addWidget(self.notes_font_reset_btn)
+        notes_toolbar_layout.addStretch()
+        tab3_layout.addWidget(notes_toolbar)
+
+        # Поле заметок
         self.notes_edit = QTextEdit()
-        self.notes_edit.setMaximumHeight(80)
-        layout.addRow("Заметки", self.notes_edit)
+        self.notes_edit.setPlaceholderText("Введите заметки здесь...")
+        self.notes_edit.setStyleSheet("background-color: #ffffff; border: 1px solid #a0a0a0; border-radius: 3px; padding: 6px;")
+        # Устанавливаем шрифт по умолчанию
+        notes_font = QFont(self.notes_edit.font())
+        notes_font.setPointSize(self.notes_font_size)
+        self.notes_edit.setFont(notes_font)
+        tab3_layout.addWidget(self.notes_edit, 1)
 
-        # Кнопки
+        self.tabs.addTab(tab3_widget, "📝 Заметки")
+
+        layout.addWidget(self.tabs, 1)  # вкладки занимают всё свободное место
+
+        # ===== Кнопки OK / Cancel (всегда видны снизу) =====
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.setStyleSheet("""
+            QPushButton {
+                padding: 6px 20px;
+                font-weight: bold;
+                min-width: 90px;
+            }
+        """)
+        layout.addWidget(buttons)
         buttons.accepted.connect(self.validate_and_accept)
         buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
 
-        # Загрузка выпадающих списков
+        # Загрузка выпадающих списков и применение стилей
         self._load_comboboxes()
+        self._apply_combobox_styles()
+        self._disable_spinbox_wheel()
+
+    # --------------------------------------------------------------------------
+    # Управление шрифтом заметок
+    # --------------------------------------------------------------------------
+    def _change_notes_font(self, delta):
+        """Изменяет размер шрифта в поле заметок на delta пунктов."""
+        new_size = self.notes_font_size + delta
+        if 6 <= new_size <= 72:
+            self.notes_font_size = new_size
+            self.notes_font_size_display.setText(str(new_size))
+            font = QFont(self.notes_edit.font())
+            font.setPointSize(new_size)
+            self.notes_edit.setFont(font)
+
+    def _reset_notes_font(self):
+        """Сбрасывает размер шрифта заметок к значению по умолчанию."""
+        self.notes_font_size = 10
+        self.notes_font_size_display.setText("10")
+        font = QFont(self.notes_edit.font())
+        font.setPointSize(10)
+        self.notes_edit.setFont(font)
+
+    # --------------------------------------------------------------------------
+    # Стили и защита от случайного изменения чисел колёсиком
+    # --------------------------------------------------------------------------
+    def _apply_combobox_styles(self):
+        """Применяет стили для комбобоксов с видимой стрелочкой."""
+        combo_style = """
+            QComboBox {
+                background-color: #ffffff;
+                border: 1px solid #a0a0a0;
+                border-radius: 3px;
+                padding: 4px 8px;
+                min-height: 20px;
+            }
+            QComboBox:hover { border: 1px solid #3399ff; }
+            QComboBox:focus { border: 1px solid #3399ff; }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 22px;
+                border-left: 1px solid #a0a0a0;
+                border-top-right-radius: 3px;
+                border-bottom-right-radius: 3px;
+                background-color: #e8e8e8;
+            }
+            QComboBox::drop-down:hover { background-color: #d8d8d8; }
+            QComboBox::down-arrow {
+                image: none;
+                width: 0; height: 0;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid #333333;
+                margin-right: 6px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #ffffff;
+                border: 1px solid #a0a0a0;
+                selection-background-color: #3399ff;
+                selection-color: #ffffff;
+                padding: 2px;
+            }
+        """
+        for combo in self.findChildren(QComboBox):
+            combo.setStyleSheet(combo_style)
+
+    def _disable_spinbox_wheel(self):
+        """Отключает изменение значений колёсиком мыши у всех QSpinBox/QDoubleSpinBox."""
+        for spinbox in self.findChildren(QSpinBox):
+            spinbox.setFocusPolicy(Qt.StrongFocus)
+        for spinbox in self.findChildren(QDoubleSpinBox):
+            spinbox.setFocusPolicy(Qt.StrongFocus)
 
     # --------------------------------------------------------------------------
     # Изображения (только локальные файлы)
@@ -238,7 +468,10 @@ class PartDialog(QDialog):
         if max_new <= 0:
             QMessageBox.warning(self, "Лимит", "Максимум 3 изображения для одной детали.")
             return
-        file_paths, _ = QFileDialog.getOpenFileNames(self, "Выберите локальные изображения (до 3)", "", "Images (*.png *.jpg *.jpeg *.gif *.bmp)")
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self, "Выберите локальные изображения (до 3)", "",
+            "Images (*.png *.jpg *.jpeg *.gif *.bmp)"
+        )
         if not file_paths:
             return
         file_paths = file_paths[:max_new]
@@ -248,34 +481,37 @@ class PartDialog(QDialog):
     def _add_image_widget(self, file_path):
         frame = QFrame()
         frame.setFrameShape(QFrame.Box)
-        frame.setStyleSheet("border: 1px solid #ccc; border-radius: 4px;")
+        frame.setStyleSheet("border: 2px dashed #aaaaaa; border-radius: 6px; background-color: #fafafa;")
         layout = QVBoxLayout(frame)
-        layout.setSpacing(2)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+        layout.setContentsMargins(8, 8, 8, 8)
 
         # Превью
         pixmap = QPixmap(file_path)
         if not pixmap.isNull():
-            pixmap = pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pixmap = pixmap.scaled(110, 110, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         label = QLabel()
-        label.setPixmap(pixmap)
+        if not pixmap.isNull():
+            label.setPixmap(pixmap)
+        else:
+            label.setText("️")
         label.setAlignment(Qt.AlignCenter)
-        label.setFixedSize(90, 90)
-        label.setStyleSheet("background-color: #f0f0f0;")
+        label.setFixedSize(110, 110)
+        label.setStyleSheet("background-color: #f0f0f0; border-radius: 4px;")
         layout.addWidget(label)
 
         # Имя файла (короткое)
         name_label = QLabel(Path(file_path).name)
         name_label.setWordWrap(True)
         name_label.setAlignment(Qt.AlignCenter)
-        name_label.setStyleSheet("font-size: 8pt;")
+        name_label.setStyleSheet("font-size: 9pt; color: #555;")
         layout.addWidget(name_label)
 
         # Кнопка удаления
-        del_btn = QPushButton("✖")
-        del_btn.setFixedSize(20, 20)
+        del_btn = QPushButton("✖ Удалить")
+        del_btn.setStyleSheet("color: #cc3333;")
         del_btn.clicked.connect(lambda: self._remove_image_widget(frame))
-        layout.addWidget(del_btn, alignment=Qt.AlignRight)
+        layout.addWidget(del_btn)
 
         self.img_container_layout.addWidget(frame)
         self.image_widgets.append((frame, file_path))
@@ -291,7 +527,7 @@ class PartDialog(QDialog):
         return [path for _, path in self.image_widgets]
 
     # --------------------------------------------------------------------------
-    # Прочее
+    # Прочее: загрузка комбобоксов, категории, номинал, места и т.д.
     # --------------------------------------------------------------------------
     def _load_comboboxes(self):
         part_types = set(self.db.get_dictionary_values('part_type'))
@@ -311,7 +547,11 @@ class PartDialog(QDialog):
         self.manufacturer_combo.addItems(sorted(manufacturers))
 
     def _open_category_selector(self):
-        dialog = CategorySelectorDialog(self, db=self.db, selected_category=self.category_edit.text(), start_depth=self.start_depth)
+        dialog = CategorySelectorDialog(
+            self, db=self.db,
+            selected_category=self.category_edit.text(),
+            start_depth=self.start_depth
+        )
         dialog.category_selected.connect(self._on_category_selected)
         dialog.exec()
 
@@ -327,7 +567,8 @@ class PartDialog(QDialog):
         elif "резистор" in path_lower:
             units = ["", "Ом", "кОм", "МОм"]
         else:
-            units = ["", "Ом", "кОм", "МОм", "пФ", "нФ", "мкФ", "Ф", "Гн", "мГн", "мкГн", "В", "А", "мА"]
+            units = ["", "Ом", "кОм", "МОм", "пФ", "нФ", "мкФ", "Ф",
+                     "Гн", "мГн", "мкГн", "В", "А", "мА"]
         combo = self.unit_combo
         current = combo.currentText()
         combo.clear()
@@ -339,8 +580,10 @@ class PartDialog(QDialog):
 
     def _show_dims_for_capacitor(self, category_path):
         if category_path and 'конденсатор' in category_path.lower():
+            self.dims_group.setChecked(True)
             self.dims_group.setVisible(True)
         else:
+            self.dims_group.setChecked(False)
             self.dims_group.setVisible(False)
 
     def _parse_and_normalize(self, raw_text: str):
@@ -354,19 +597,20 @@ class PartDialog(QDialog):
                 if num.is_integer():
                     num = int(num)
                 return num, "", str(num)
-            except:
+            except Exception:
                 return None, "", ""
         num_str, unit_raw = match.groups()
         try:
             numeric = float(num_str)
             if numeric.is_integer():
                 numeric = int(numeric)
-        except:
+        except Exception:
             return None, "", ""
         unit_lower = unit_raw.lower()
         unit_map = {
             'k': 'кОм', 'm': 'МОм', 'r': 'Ом', 'ohm': 'Ом',
-            'n': 'нФ', 'u': 'мкФ', 'p': 'пФ', 'mf': 'мкФ', 'µ': 'мкФ', 'μ': 'мкФ',
+            'n': 'нФ', 'u': 'мкФ', 'p': 'пФ', 'mf': 'мкФ',
+            'µ': 'мкФ', 'μ': 'мкФ',
             'mhz': 'МГц', 'khz': 'кГц', 'hz': 'Гц',
             'v': 'В', 'mv': 'мВ', 'a': 'А', 'ma': 'мА',
             'h': 'Гн', 'mh': 'мГн'
@@ -418,7 +662,10 @@ class PartDialog(QDialog):
         if assembled:
             self.name_edit.setText(assembled)
         else:
-            QMessageBox.information(self, "Невозможно собрать", "Заполните хотя бы номинал или выберите категорию с параметрами")
+            QMessageBox.information(
+                self, "Невозможно собрать",
+                "Заполните хотя бы номинал или выберите категорию с параметрами"
+            )
 
     def _browse_file(self, line_edit, filter_str):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите файл", "", filter_str)
@@ -515,6 +762,7 @@ class PartDialog(QDialog):
 
     def _fill_form(self, data):
         self.name_edit.setText(data.get('name', ''))
+
         cat_id = data.get('category_id')
         if cat_id:
             cats = self.db.get_categories()
@@ -524,12 +772,15 @@ class PartDialog(QDialog):
             self._show_dims_for_capacitor(path)
         else:
             self.category_edit.setText("")
+
         pt_val = data.get('part_type', '')
         idx = self.part_type_combo.findText(pt_val)
         self.part_type_combo.setCurrentIndex(idx) if idx >= 0 else self.part_type_combo.setCurrentText(pt_val)
+
         m_val = data.get('manufacturer', '')
         idx = self.manufacturer_combo.findText(m_val)
         self.manufacturer_combo.setCurrentIndex(idx) if idx >= 0 else self.manufacturer_combo.setCurrentText(m_val)
+
         self.part_number_edit.setText(data.get('part_number', ''))
         self.package_combo.setCurrentText(data.get('package', ''))
         self.quantity_spin.setValue(data.get('quantity', 0))
@@ -539,6 +790,7 @@ class PartDialog(QDialog):
         self.lead_pitch_spin.setValue(data.get('lead_pitch_mm', 0) or 0)
         self.lead_diameter_spin.setValue(data.get('lead_diameter_mm', 0) or 0)
 
+        # Номинал и единица
         value_numeric = data.get('value_numeric')
         value_unit = data.get('value_unit', '')
         if value_numeric is not None:
@@ -558,12 +810,14 @@ class PartDialog(QDialog):
         else:
             self.unit_combo.setCurrentIndex(0)
 
+        # Статус
         status_val = data.get('status', 'Новое')
         for i in range(self.status_combo.count()):
             if self.status_combo.itemText(i) == status_val:
                 self.status_combo.setCurrentIndex(i)
                 break
 
+        # Место хранения
         location = data.get('location', '')
         if location:
             parts = [p.strip() for p in location.split('/')]
@@ -579,7 +833,7 @@ class PartDialog(QDialog):
             if len(parts) >= 4:
                 self.location_section_combo.setCurrentText(parts[3])
 
-        # Загрузка изображений: только локальные файлы, URL не отображаем в виджетах (они останутся в полях)
+        # Изображения (только локальные файлы)
         image_paths = [
             data.get('image_path', ''),
             data.get('image_path_2', ''),
@@ -587,16 +841,20 @@ class PartDialog(QDialog):
         ]
         for path in image_paths:
             if path and not path.startswith(('http://', 'https://')):
-                # только локальные файлы
                 full_path = DATA_DIR / "images" / Path(path).name
                 if full_path.exists():
                     self._add_image_widget(str(full_path))
 
+        # Даташит
         self.datasheet_path_edit.setText(data.get('datasheet_path', ''))
+
+        # Дата ревизии
         if data.get('revision_date'):
             q_date = QDate.fromString(data['revision_date'], "yyyy-MM-dd")
             if q_date.isValid():
                 self.revision_date.setDate(q_date)
+
+        # Заметки
         self.notes_edit.setPlainText(data.get('notes', ''))
 
     def validate_and_accept(self):
@@ -655,5 +913,5 @@ class PartDialog(QDialog):
             'height_mm': self.height_spin.value() if self.height_spin.value() > 0 else None,
             'lead_pitch_mm': self.lead_pitch_spin.value() if self.lead_pitch_spin.value() > 0 else None,
             'lead_diameter_mm': self.lead_diameter_spin.value() if self.lead_diameter_spin.value() > 0 else None,
-            'image_files': self._get_image_paths()   # только вновь выбранные локальные файлы
+            'image_files': self._get_image_paths()
         }
