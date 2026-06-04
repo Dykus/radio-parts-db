@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox,
     QDateTimeEdit, QTextEdit, QDialogButtonBox, QMessageBox, QFileDialog,
-    QWidget, QHBoxLayout, QPushButton, QLabel, QScrollArea, QFrame, QVBoxLayout,
+    QWidget, QHBoxLayout, QPushButton, QLabel, QFrame, QVBoxLayout,
     QTabWidget, QGroupBox, QSplitter
 )
 from PySide6.QtCore import Qt, QDate
@@ -149,11 +149,10 @@ class PartDialog(QDialog):
         manuf_form.addRow("Производитель", self.manufacturer_combo)
         left_layout.addWidget(manuf_group)
 
-        # Сворачиваемая группа «Габариты конденсаторов»
+        # Сворачиваемая группа «Габариты конденсаторов» - БЕЗ чекбокса
+        # Видимость управляется автоматически через _show_dims_for_capacitor()
         self.dims_group = QGroupBox("📏 Габариты (для конденсаторов)")
-        self.dims_group.setCheckable(True)
-        self.dims_group.setChecked(False)
-        self.dims_group.setVisible(False)  # скрыта по умолчанию, показывается для конденсаторов
+        self.dims_group.setVisible(False)  # скрыта по умолчанию
         dims_form = QFormLayout(self.dims_group)
         dims_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
@@ -246,7 +245,7 @@ class PartDialog(QDialog):
         self.revision_date = QDateTimeEdit()
         self.revision_date.setDisplayFormat("dd.MM.yyyy")
         self.revision_date.setCalendarPopup(True)
-        today_btn = QPushButton("📅 Сегодня")
+        today_btn = QPushButton(" Сегодня")
         today_btn.clicked.connect(lambda: self.revision_date.setDate(QDate.currentDate()))
         revision_layout.addWidget(self.revision_date)
         revision_layout.addWidget(today_btn)
@@ -259,7 +258,7 @@ class PartDialog(QDialog):
         splitter.setSizes([380, 380])
         tab1_layout.addWidget(splitter, 1)  # растягивается
 
-        self.tabs.addTab(tab1_widget, "📋 Основная информация")
+        self.tabs.addTab(tab1_widget, " Основная информация")
 
         # ====================================================================
         # ВКЛАДКА 2: Изображения и даташит
@@ -270,36 +269,51 @@ class PartDialog(QDialog):
         tab2_layout.setSpacing(12)
 
         # --- Изображения ---
-        img_group = QGroupBox(" Изображения (до 3)")
+        img_group = QGroupBox("🖼️ Изображения (до 3)")
         img_layout = QVBoxLayout(img_group)
         img_layout.setSpacing(8)
 
         img_info = QLabel("Можно добавить до 3 локальных изображений. Они будут сжаты в WebP.")
-        img_info.setStyleSheet("color: #666; font-style: italic;")
+        img_info.setStyleSheet("color: #666; font-style: italic; font-size: 10pt;")
         img_layout.addWidget(img_info)
 
-        self.img_btn = QPushButton("📷 Добавить локальные изображения")
-        self.img_btn.setMinimumHeight(30)
+        # Кнопка добавления — компактная, не на всю ширину
+        img_btn_widget = QWidget()
+        img_btn_layout = QHBoxLayout(img_btn_widget)
+        img_btn_layout.setContentsMargins(0, 0, 0, 0)
+        self.img_btn = QPushButton("️ Добавить изображения")
+        self.img_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3399ff; color: white; border: none;
+                border-radius: 4px; padding: 6px 16px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #2980b9; }
+            QPushButton:pressed { background-color: #1f6fa0; }
+        """)
+        self.img_btn.setMinimumHeight(32)
         self.img_btn.clicked.connect(self._add_images)
-        img_layout.addWidget(self.img_btn)
+        img_btn_layout.addWidget(self.img_btn)
+        img_btn_layout.addStretch()
+        img_layout.addWidget(img_btn_widget)
 
+        # Контейнер для превью
         img_preview_widget = QWidget()
         self.img_container_layout = QHBoxLayout(img_preview_widget)
-        self.img_container_layout.setSpacing(15)
-        self.img_container_layout.setAlignment(Qt.AlignCenter)
+        self.img_container_layout.setSpacing(12)
+        self.img_container_layout.setAlignment(Qt.AlignLeft)
         img_layout.addWidget(img_preview_widget)
         img_layout.addStretch()
 
-        self.img_container = img_preview_widget  # для обратной совместимости с методами работы с картинками
+        self.img_container = img_preview_widget
         tab2_layout.addWidget(img_group, 1)
 
         # --- Даташит ---
         ds_group = QGroupBox("📄 Даташит")
         ds_layout = QVBoxLayout(ds_group)
-        ds_layout.setSpacing(6)
+        ds_layout.setSpacing(8)
 
         ds_info = QLabel("Укажите путь к PDF-файлу даташита. Можно выбрать локальный файл.")
-        ds_info.setStyleSheet("color: #666; font-style: italic;")
+        ds_info.setStyleSheet("color: #666; font-style: italic; font-size: 10pt;")
         ds_info.setWordWrap(True)
         ds_layout.addWidget(ds_info)
 
@@ -316,10 +330,10 @@ class PartDialog(QDialog):
 
         tab2_layout.addWidget(ds_group, 1)
 
-        self.tabs.addTab(tab2_widget, "📷 Изображения и даташит")
+        self.tabs.addTab(tab2_widget, "🖼️ Изображения и даташит")
 
         # ====================================================================
-        # ВКЛАДКА 3: Заметки с управлением шрифтом
+        # ВКЛАДКА 3: Заметки
         # ====================================================================
         tab3_widget = QWidget()
         tab3_layout = QVBoxLayout(tab3_widget)
@@ -409,10 +423,10 @@ class PartDialog(QDialog):
         self.notes_edit.setFont(font)
 
     # --------------------------------------------------------------------------
-    # Стили и защита от случайного изменения чисел колёсиком
+    # Стили и защита spinbox'ов
     # --------------------------------------------------------------------------
     def _apply_combobox_styles(self):
-        """Применяет стили для комбобоксов с видимой стрелочкой."""
+        """Применяет стили для комбобоксов с видимой стрелочкой через SVG."""
         combo_style = """
             QComboBox {
                 background-color: #ffffff;
@@ -434,12 +448,10 @@ class PartDialog(QDialog):
             }
             QComboBox::drop-down:hover { background-color: #d8d8d8; }
             QComboBox::down-arrow {
-                image: none;
-                width: 0; height: 0;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid #333333;
-                margin-right: 6px;
+                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='%23333333' d='M2 4l4 4 4-4z'/></svg>");
+                width: 12px;
+                height: 12px;
+                margin-right: 5px;
             }
             QComboBox QAbstractItemView {
                 background-color: #ffffff;
@@ -460,7 +472,7 @@ class PartDialog(QDialog):
             spinbox.setFocusPolicy(Qt.StrongFocus)
 
     # --------------------------------------------------------------------------
-    # Изображения (только локальные файлы)
+    # Изображения
     # --------------------------------------------------------------------------
     def _add_images(self):
         current_count = len(self.image_widgets)
@@ -480,38 +492,68 @@ class PartDialog(QDialog):
 
     def _add_image_widget(self, file_path):
         frame = QFrame()
-        frame.setFrameShape(QFrame.Box)
-        frame.setStyleSheet("border: 2px dashed #aaaaaa; border-radius: 6px; background-color: #fafafa;")
+        frame.setFrameShape(QFrame.StyledPanel)
+        frame.setStyleSheet("""
+            QFrame {
+                background-color: #fafafa;
+                border: 1px solid #d0d0d0;
+                border-radius: 6px;
+            }
+            QFrame:hover {
+                border: 1px solid #3399ff;
+                background-color: #f0f8ff;
+            }
+        """)
         layout = QVBoxLayout(frame)
-        layout.setSpacing(5)
+        layout.setSpacing(4)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        # Превью
+        # Превью изображения
         pixmap = QPixmap(file_path)
         if not pixmap.isNull():
-            pixmap = pixmap.scaled(110, 110, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        label = QLabel()
+            pixmap = pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        
+        img_label = QLabel()
         if not pixmap.isNull():
-            label.setPixmap(pixmap)
+            img_label.setPixmap(pixmap)
         else:
-            label.setText("️")
-        label.setAlignment(Qt.AlignCenter)
-        label.setFixedSize(110, 110)
-        label.setStyleSheet("background-color: #f0f0f0; border-radius: 4px;")
-        layout.addWidget(label)
+            img_label.setText("⚠️")
+            img_label.setStyleSheet("font-size: 24pt;")
+        img_label.setAlignment(Qt.AlignCenter)
+        img_label.setFixedSize(100, 100)
+        img_label.setStyleSheet("background-color: #ffffff; border-radius: 4px;")
+        layout.addWidget(img_label, alignment=Qt.AlignCenter)
 
-        # Имя файла (короткое)
+        # Имя файла
         name_label = QLabel(Path(file_path).name)
         name_label.setWordWrap(True)
         name_label.setAlignment(Qt.AlignCenter)
-        name_label.setStyleSheet("font-size: 9pt; color: #555;")
+        name_label.setStyleSheet("font-size: 9pt; color: #333; padding: 2px;")
+        name_label.setMaximumHeight(30)
         layout.addWidget(name_label)
 
-        # Кнопка удаления
-        del_btn = QPushButton("✖ Удалить")
-        del_btn.setStyleSheet("color: #cc3333;")
+        # Кнопка удаления с текстом
+        del_btn = QPushButton("Удалить")
+        del_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff6b6b;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 2px 8px;
+                font-size: 9pt;
+            }
+            QPushButton:hover { background-color: #ff5252; }
+            QPushButton:pressed { background-color: #ff3838; }
+        """)
+        del_btn.setFixedHeight(22)
         del_btn.clicked.connect(lambda: self._remove_image_widget(frame))
-        layout.addWidget(del_btn)
+        
+        overlay_layout = QHBoxLayout()
+        overlay_layout.addStretch()
+        overlay_layout.addWidget(del_btn)
+        overlay_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(overlay_layout)
 
         self.img_container_layout.addWidget(frame)
         self.image_widgets.append((frame, file_path))
@@ -527,7 +569,7 @@ class PartDialog(QDialog):
         return [path for _, path in self.image_widgets]
 
     # --------------------------------------------------------------------------
-    # Прочее: загрузка комбобоксов, категории, номинал, места и т.д.
+    # Прочее: комбобоксы, категории, номинал, места и т.д.
     # --------------------------------------------------------------------------
     def _load_comboboxes(self):
         part_types = set(self.db.get_dictionary_values('part_type'))
@@ -579,11 +621,10 @@ class PartDialog(QDialog):
             combo.setCurrentIndex(0)
 
     def _show_dims_for_capacitor(self, category_path):
+        """Автоматически показывает/скрывает группу габаритов в зависимости от категории."""
         if category_path and 'конденсатор' in category_path.lower():
-            self.dims_group.setChecked(True)
             self.dims_group.setVisible(True)
         else:
-            self.dims_group.setChecked(False)
             self.dims_group.setVisible(False)
 
     def _parse_and_normalize(self, raw_text: str):
@@ -632,8 +673,7 @@ class PartDialog(QDialog):
 
     def _assemble_name(self):
         category_path = self.category_edit.text().strip()
-        voltage = ''
-        power = ''
+        voltage = power = ''
         if category_path:
             last_part = category_path.split('/')[-1].strip()
             if re.search(r'\d+V', last_part, re.IGNORECASE):
@@ -642,6 +682,7 @@ class PartDialog(QDialog):
                 match = re.search(r'([\d\.]+)\s*[WВт]', last_part, re.IGNORECASE)
                 if match:
                     power = f"{match.group(1)} Вт"
+        
         raw_value = self.value_edit.text().strip()
         numeric, unit, normalized = self._parse_and_normalize(raw_value)
         if not unit and self.unit_combo.currentText():
@@ -650,15 +691,18 @@ class PartDialog(QDialog):
                 normalized = f"{numeric}{unit}"
             else:
                 normalized = unit
+                
         if unit:
             value_part = normalized
         elif numeric is not None:
             value_part = str(numeric)
         else:
             value_part = raw_value
+        
         package = self.package_combo.currentText().strip()
         name_parts = [p for p in (value_part, voltage, power, package) if p]
         assembled = " ".join(name_parts)
+        
         if assembled:
             self.name_edit.setText(assembled)
         else:

@@ -5,8 +5,8 @@ import urllib.request
 import ssl
 from pathlib import Path
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QTreeWidget, QTreeWidgetItem, 
-    QStyle, QMenu, QPushButton
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
+    QStyle, QMenu, QPushButton, QScrollArea
 )
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QPixmap
@@ -38,7 +38,7 @@ class InfoPanelWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        photo_label = QLabel("📷 Предпросмотр")
+        photo_label = QLabel("🖼️ Предпросмотр")
         photo_label.setStyleSheet("font-size: 12px; font-weight: bold;")
         layout.addWidget(photo_label)
 
@@ -47,7 +47,7 @@ class InfoPanelWidget(QWidget):
         self.image_label.setMinimumHeight(150)
         self.image_label.setMaximumHeight(220)
         self.image_label.setStyleSheet("QLabel { background-color: #ffffff; border: 1px solid #cccccc; border-radius: 3px; }")
-        self.image_label.setText("📷")
+        self.image_label.setText("🖼️")
         self.image_label.setScaledContents(False)
 
         scroll_area = QScrollArea()
@@ -135,11 +135,13 @@ class InfoPanelWidget(QWidget):
     def load_tree(self):
         self.location_tree.clear()
         tree_data = self.db.get_location_tree()
+        
         def build_tree(data_dict, parent_item):
             for key, value in sorted(data_dict.items()):
                 item = QTreeWidgetItem(parent_item, [key])
                 item.setIcon(0, self.style().standardIcon(QStyle.SP_DirIcon))
                 build_tree(value, item)
+        
         root = QTreeWidgetItem(self.location_tree, ["🏠 Все места"])
         root.setIcon(0, self.style().standardIcon(QStyle.SP_DriveHDIcon))
         build_tree(tree_data, root)
@@ -189,8 +191,10 @@ class InfoPanelWidget(QWidget):
         if not part:
             self._clear_preview()
             return
+        
         image_path = part.get('image_path', '').strip()
         pixmap = QPixmap()
+        
         if image_path:
             if image_path.startswith(('http://', 'https://')):
                 pixmap = self._load_pixmap_from_url(image_path)
@@ -199,24 +203,27 @@ class InfoPanelWidget(QWidget):
                 img_path = DATA_DIR / "images" / Path(image_path).name
                 if img_path.exists():
                     pixmap = QPixmap(str(img_path))
+        
         if not pixmap.isNull():
             scaled = pixmap.scaled(self.image_label.size() - QSize(20, 20),
                                    Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.image_label.setPixmap(scaled)
             self.image_label.setText("")
         else:
-            self.image_label.setText("📷")
+            self.image_label.setText("🖼️")
+        
         info_text = f"<b>{part['name']}</b><br>"
         if part.get('part_type'):
             info_text += f"Тип: {part['part_type']}<br>"
         if part.get('package'):
             info_text += f"Корпус: {part['package']}<br>"
         info_text += f"Кол-во: {part['quantity']} | Цена: {part['price']:.2f} ₽"
+        
         self.info_label.setText(info_text)
         self.highlight_location(part.get('location', ''))
 
     def _clear_preview(self):
         self.image_label.clear()
-        self.image_label.setText("📷")
+        self.image_label.setText("🖼️")
         self.info_label.setText("")
         self.location_tree.clearSelection()

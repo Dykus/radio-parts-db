@@ -20,27 +20,35 @@ class PartsTableModel(QStandardItemModel):
     def _format_package_with_dimensions(self, package, dims, has_photo):
         if not dims:
             pkg_text = package or ''
-            return f"📷 {pkg_text}" if has_photo and pkg_text else (pkg_text if pkg_text else ('📷' if has_photo else ''))
+            return f"🖼️ {pkg_text}" if has_photo and pkg_text else (pkg_text if pkg_text else ('🖼️' if has_photo else ''))
+        
         parts = []
         if package:
             parts.append(package)
+        
         diam = dims.get('diameter_mm') or 0
         height = dims.get('height_mm') or 0
         pitch = dims.get('lead_pitch_mm') or 0
         lead_d = dims.get('lead_diameter_mm') or 0
+        
         if diam > 0 and height > 0:
             parts.append(f"⌀{diam}×{height}мм")
         elif diam > 0:
             parts.append(f"⌀{diam}мм")
         elif height > 0:
             parts.append(f"высота {height}мм")
+        
         if pitch > 0:
             parts.append(f"шаг {pitch}мм")
+        
         if lead_d > 0:
             parts.append(f"вывод {lead_d}мм")
+        
         result = ' / '.join(parts) if parts else (package or '')
+        
         if has_photo:
-            result = f"📷 {result}"
+            result = f"🖼️ {result}"
+        
         return result
 
     def load_data(self, category_id=None, filter_type="all", location_path=None):
